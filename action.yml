@@ -1,0 +1,58 @@
+# The composite action at the root of the brevio-core repository (`uses: <org>/brevio-core@v0`). Its own CI runs it with `uses: ./`.
+name: 'Brevio Gate'
+description: 'Zero-token pull-request gate: 122 deterministic code rules on the added lines, no model call, no secrets'
+author: 'Brevio'
+branding:
+  icon: 'shield'
+  color: 'blue'
+inputs:
+  base:
+    description: 'Git ref the diff is taken against; empty uses the pull request base, else origin/main'
+    required: false
+    default: ''
+  sarif:
+    description: 'Write a SARIF file for code scanning when true'
+    required: false
+    default: 'false'
+  source:
+    description: 'pip requirement or path to install instead of the PyPI release (the repository itself uses ".")'
+    required: false
+    default: ''
+  package-version:
+    description: 'brevio-core version to install; pin it for a reproducible gate'
+    required: false
+    default: ''
+outputs:
+  status:
+    description: 'pass or fail'
+    value: ${{ steps.scan.outputs.status }}
+runs:
+  using: 'composite'
+  steps:
+    - name: Set up Python
+      uses: actions/setup-python@v5
+      with:
+        python-version: '3.12'
+    - name: Install brevio-core
+      shell: bash
+      env:
+        PKG_VERSION: ${{ inputs.package-version }}
+        PKG_SOURCE: ${{ inputs.source }}
+      run: pip install --quiet "${PKG_SOURCE:-brevio-core${PKG_VERSION:+==$PKG_VERSION}}"
+    - name: Scan the pull request diff
+      id: scan
+      shell: bash
+      env:
+        BASE_INPUT: ${{ inputs.base }}
+        PR_BASE: ${{ github.base_ref }}
+        WANT_SARIF: ${{ inputs.sarif }}
+      run: |
+        base="${BASE_INPUT:-${PR_BASE:+origin/$PR_BASE}}"
+        base="${base:-origin/main}"
+        if [ "$WANT_SARIF" = "true" ]; then
+          brevio-core scan --diff "$base" --sarif brevio-gate.sarif && rc=0 || rc=$?
+        else
+          brevio-core scan --diff "$base" && rc=0 || rc=$?
+        fi
+        if [ "$rc" -eq 0 ]; then echo "status=pass" >> "$GITHUB_OUTPUT"; else echo "status=fail" >> "$GITHUB_OUTPUT"; fi
+        exit "$rc"
