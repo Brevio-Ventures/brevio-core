@@ -89,7 +89,15 @@ def diff_lines(base: str) -> Numbered:
     for new in _git("ls-files", "--others", "--exclude-standard").splitlines():
         if new.endswith(CODE_SUFFIXES):
             out[new] = _read(new)
-    return out
+    # Build output and dependencies are never the change under review, tracked or not: an install in CI writes
+    # build/lib copies of the package, and scanning those flagged the rule docs' own bad examples (2026-11-05).
+    return {p: v for p, v in out.items() if not skipped(p)}
+
+
+def skipped(path: str) -> bool:
+    """``path`` lies in a folder the scan never reads (``SKIP_DIRS`` or an ``*.egg-info`` folder)."""
+    parts = path.replace("\\", "/").split("/")[:-1]
+    return any(p in SKIP_DIRS or p.endswith(".egg-info") for p in parts)
 
 
 def scan(files: Numbered) -> list[str]:

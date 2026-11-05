@@ -42,6 +42,20 @@ class TestScanCommand(unittest.TestCase):
             self.assertIn("src/bad.ts:1: [R13.1]", bad.stdout)
             self.assertEqual(run_cli(d, "scan", "src/ok.ts").returncode, 0)
 
+    def test_a_diff_scan_skips_build_output(self):
+        """CI installs the package, which writes build/lib copies; those are not the change (2026-11-05)."""
+        with tempfile.TemporaryDirectory() as d:
+            git(d, "init", "-q")
+            write(d, "app.ts", CLEAN_LINE)
+            git(d, "add", "-A")
+            git(d, "commit", "-qm", "base")
+            write(d, "build/lib/pkg/x.py", SECRET_LINE)
+            write(d, "pkg.egg-info/x.py", SECRET_LINE)
+            r = run_cli(d, "scan", "--diff", "HEAD")
+            self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+            write(d, "src/y.ts", SECRET_LINE)
+            self.assertEqual(run_cli(d, "scan", "--diff", "HEAD").returncode, 1)
+
     def test_a_folder_is_walked_and_the_default_is_the_current_folder(self):
         with tempfile.TemporaryDirectory() as d:
             write(d, "src/deep/bad.ts", SECRET_LINE)
