@@ -17,7 +17,7 @@ EXPORTER = os.path.join(ROOT, "tools", "export_core.py")      # present in the h
 TREE = ROOT
 # A fake key in the AWS access key format (AWS's documented example key ID), joined at run time so this file is not
 # itself a finding of a secret scan. The hardcoded-secret rule (R13.1) flags the format (E35 precision run, 2026-11-05).
-SECRET_LINE = "const apiKey = '" + "AKIA" + "IOSFODNN7EXAMPLE" + "';\n"
+AWS_EXAMPLE_LINE = "const apiKey = '" + "AKIA" + "IOSFODNN7EXAMPLE" + "';\n"
 CLEAN_LINE = "export const add = (a: number, b: number): number => a + b;\n"
 _SERVE = ("import sys; sys.path.insert(0, sys.argv[1]); from brevio.pipeline import core_cli; code = core_cli.main(['mcp', *sys.argv[2:]]); "
           "sys.stderr.write('NET:' + ','.join(sorted(m for m in ('socket', 'ssl', 'urllib.request', 'http.client') if m in sys.modules))); "
@@ -111,7 +111,7 @@ class TestProtocol(unittest.TestCase):
 
     def test_a_whole_session_makes_no_network_call(self):
         with tempfile.TemporaryDirectory() as d:
-            write(d, "src/bad.ts", SECRET_LINE)
+            write(d, "src/bad.ts", AWS_EXAMPLE_LINE)
             _replies, err, code = session(d, rpc(1, "initialize", {}), call(2, "scan", paths=["src"]), call(3, "explain", rule="R2.1"))
         self.assertEqual(code, 0)
         self.assertEqual(err, "NET:")      # no network module was even loaded
@@ -127,7 +127,7 @@ class TestProtocol(unittest.TestCase):
 class TestScanTool(unittest.TestCase):
     def test_a_planted_secret_comes_back_as_a_finding_and_a_clean_file_does_not(self):
         with tempfile.TemporaryDirectory() as d:
-            write(d, "src/bad.ts", SECRET_LINE)
+            write(d, "src/bad.ts", AWS_EXAMPLE_LINE)
             write(d, "src/ok.ts", CLEAN_LINE)
             replies, _err, _code = session(d, rpc(1, "initialize", {}), call(2, "scan", paths=["src/bad.ts"]),
                                            call(3, "scan", paths=["src/ok.ts"]))
@@ -143,27 +143,27 @@ class TestScanTool(unittest.TestCase):
     def test_with_no_arguments_it_scans_the_uncommitted_changes(self):
         with tempfile.TemporaryDirectory() as d:
             git(d, "init", "-q", "-b", "main")
-            write(d, "src/old.ts", SECRET_LINE)
+            write(d, "src/old.ts", AWS_EXAMPLE_LINE)
             git(d, "add", ".")
             git(d, "commit", "-q", "-m", "first")
-            write(d, "src/new.ts", SECRET_LINE)
+            write(d, "src/new.ts", AWS_EXAMPLE_LINE)
             replies, _err, _code = session(d, call(1, "scan"))
         self.assertEqual(found_paths(replies[0]), {"src/new.ts"})
 
     def test_a_diff_scan_reports_only_the_lines_the_change_adds(self):
         with tempfile.TemporaryDirectory() as d:
             git(d, "init", "-q", "-b", "main")
-            write(d, "src/a.ts", SECRET_LINE)
+            write(d, "src/a.ts", AWS_EXAMPLE_LINE)
             git(d, "add", ".")
             git(d, "commit", "-q", "-m", "first")
-            write(d, "src/b.ts", SECRET_LINE)
+            write(d, "src/b.ts", AWS_EXAMPLE_LINE)
             replies, _err, _code = session(d, call(1, "scan", diff_base="HEAD"), call(2, "scan", paths=["src"]))
         self.assertEqual(found_paths(replies[0]), {"src/b.ts"})
         self.assertEqual(found_paths(replies[1]), {"src/a.ts", "src/b.ts"})
 
     def test_a_path_that_is_missing_or_outside_the_project_is_an_error_result(self):
         with tempfile.TemporaryDirectory() as d, tempfile.TemporaryDirectory() as other:
-            write(other, "x.ts", SECRET_LINE)
+            write(other, "x.ts", AWS_EXAMPLE_LINE)
             replies, _err, _code = session(d, call(1, "scan", paths=["nope.ts"]), call(2, "scan", paths=[other]),
                                            call(3, "scan", diff_base="--output=x"), call(4, "scan", paths="src"))
         for r in replies:
@@ -172,7 +172,7 @@ class TestScanTool(unittest.TestCase):
 
     def test_a_long_list_of_findings_is_cut_and_says_so(self):
         with tempfile.TemporaryDirectory() as d:
-            write(d, "src/many.ts", SECRET_LINE * 250)
+            write(d, "src/many.ts", AWS_EXAMPLE_LINE * 250)
             replies, _err, _code = session(d, call(1, "scan", paths=["src"]))
         data, text = replies[0]["result"]["structuredContent"], replies[0]["result"]["content"][0]["text"].splitlines()
         self.assertEqual(data["count"], 250)

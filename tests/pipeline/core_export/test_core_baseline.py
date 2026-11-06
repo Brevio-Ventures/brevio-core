@@ -19,8 +19,8 @@ TREE = ROOT
 _EXPORT = tempfile.TemporaryDirectory()
 # A fake key in the AWS access key format (AWS's documented example key ID), joined at run time so this file is not
 # itself a finding of a secret scan. The hardcoded-secret rule (R13.1) flags the format (E35 precision run, 2026-11-05).
-SECRET = "const apiKey = '" + "AKIA" + "IOSFODNN7EXAMPLE" + "';\n"
-OTHER_SECRET = "const apiKey = '" + "AKIA" + "I44QH8DHBEXAMPLE" + "';\n"
+AWS_EXAMPLE_LINE = "const apiKey = '" + "AKIA" + "IOSFODNN7EXAMPLE" + "';\n"
+OTHER_AWS_EXAMPLE_LINE = "const apiKey = '" + "AKIA" + "I44QH8DHBEXAMPLE" + "';\n"
 TS_IGNORE = "// @ts-ignore\n"
 CLEAN = "export const add = (a: number, b: number): number => a + b;\n"
 # Built at run time, so this file holds no ignore comment of its own for a diff scan to report.
@@ -81,7 +81,7 @@ def committed_repo(d, files):
 class TestBaseline(unittest.TestCase):
     def test_a_planted_repo_passes_after_baseline_and_fails_on_one_new_finding(self):
         with tempfile.TemporaryDirectory() as d:
-            write(d, "src/old.ts", SECRET + TS_IGNORE + "const n: number = 'x';\n")
+            write(d, "src/old.ts", AWS_EXAMPLE_LINE + TS_IGNORE + "const n: number = 'x';\n")
             self.assertEqual(run_cli(d, "scan").returncode, 1)
             made = run_cli(d, "baseline")
             self.assertEqual(made.returncode, 0, made.stderr)
@@ -89,25 +89,25 @@ class TestBaseline(unittest.TestCase):
             quiet = run_cli(d, "scan")
             self.assertEqual((quiet.returncode, quiet.stdout), (0, ""), quiet.stderr)
             self.assertIn("0 finding(s) in 1 file(s), 2 baselined, 0 silenced", quiet.stderr)
-            write(d, "src/new.ts", OTHER_SECRET)
+            write(d, "src/new.ts", OTHER_AWS_EXAMPLE_LINE)
             loud = run_cli(d, "scan")
             self.assertEqual(loud.returncode, 1)
             self.assertEqual(loud.stdout.splitlines(), ["src/new.ts:1: [R13.1] Hardcoded secret pattern detected in added code"])
 
     def test_a_moved_line_stays_baselined_and_a_copy_of_it_does_not(self):
         with tempfile.TemporaryDirectory() as d:
-            write(d, "src/a.ts", SECRET)
+            write(d, "src/a.ts", AWS_EXAMPLE_LINE)
             run_cli(d, "baseline")
-            write(d, "src/a.ts", CLEAN * 5 + "  " + SECRET)       # moved down and re-indented
+            write(d, "src/a.ts", CLEAN * 5 + "  " + AWS_EXAMPLE_LINE)       # moved down and re-indented
             self.assertEqual(run_cli(d, "scan").returncode, 0)
-            write(d, "src/a.ts", CLEAN + SECRET + SECRET)          # the same line twice: one is new
+            write(d, "src/a.ts", CLEAN + AWS_EXAMPLE_LINE + AWS_EXAMPLE_LINE)          # the same line twice: one is new
             twice = run_cli(d, "scan")
             self.assertEqual((twice.returncode, len(twice.stdout.splitlines())), (1, 1), twice.stdout)
 
     def test_the_file_is_sorted_one_entry_per_line_stable_and_drops_fixed_findings(self):
         with tempfile.TemporaryDirectory() as d:
-            write(d, "src/b.ts", SECRET)
-            write(d, "src/a.ts", TS_IGNORE + SECRET)
+            write(d, "src/b.ts", AWS_EXAMPLE_LINE)
+            write(d, "src/a.ts", TS_IGNORE + AWS_EXAMPLE_LINE)
             run_cli(d, "baseline")
             first = read(d, ".brevio/baseline.json")
             run_cli(d, "baseline")
@@ -123,8 +123,8 @@ class TestBaseline(unittest.TestCase):
 
     def test_a_baseline_of_one_path_keeps_the_entries_of_the_others(self):
         with tempfile.TemporaryDirectory() as d:
-            write(d, "src/a.ts", SECRET)
-            write(d, "lib/b.ts", SECRET)
+            write(d, "src/a.ts", AWS_EXAMPLE_LINE)
+            write(d, "lib/b.ts", AWS_EXAMPLE_LINE)
             run_cli(d, "baseline")
             write(d, "src/a.ts", CLEAN)
             self.assertIn("1 finding(s)", run_cli(d, "baseline", "src").stdout)
@@ -132,9 +132,9 @@ class TestBaseline(unittest.TestCase):
 
     def test_fail_on_none_exits_zero_and_still_prints_and_all_ignores_the_baseline(self):
         with tempfile.TemporaryDirectory() as d:
-            write(d, "src/a.ts", SECRET)
+            write(d, "src/a.ts", AWS_EXAMPLE_LINE)
             run_cli(d, "baseline")
-            write(d, "src/b.ts", OTHER_SECRET)
+            write(d, "src/b.ts", OTHER_AWS_EXAMPLE_LINE)
             none = run_cli(d, "scan", "--fail-on", "none")
             self.assertEqual(none.returncode, 0)
             self.assertEqual([ln.split(":")[0] for ln in none.stdout.splitlines()], ["src/b.ts"])
@@ -146,7 +146,7 @@ class TestBaseline(unittest.TestCase):
     def test_every_scan_mode_reads_the_baseline(self):
         with tempfile.TemporaryDirectory() as d:
             committed_repo(d, {"src/a.ts": CLEAN})
-            write(d, "src/a.ts", CLEAN + SECRET)
+            write(d, "src/a.ts", CLEAN + AWS_EXAMPLE_LINE)
             run_cli(d, "baseline", "--diff", "HEAD")
             for args in (["scan", "src"], ["scan", "--file", "src/a.ts"], ["scan", "--forbid-ignores", "--file", "src/a.ts"],
                          ["scan", "--diff", "HEAD", "--allow-new-suppressions"]):
@@ -168,7 +168,7 @@ class TestInlineIgnore(unittest.TestCase):
     def test_an_ignore_with_a_reason_silences_that_rule_on_the_line_and_the_line_below(self):
         with tempfile.TemporaryDirectory() as d:
             write(d, "src/a.ts", f"{IGNORE} R9.2 -- generated client\n" + TS_IGNORE
-                  + SECRET.rstrip("\n") + f" {IGNORE} R13.1 -- a fixture key */\n")
+                  + AWS_EXAMPLE_LINE.rstrip("\n") + f" {IGNORE} R13.1 -- a fixture key */\n")
             res = run_cli(d, "scan")
             self.assertEqual((res.returncode, res.stdout), (0, ""), res.stdout)
             self.assertIn("0 finding(s) in 1 file(s), 0 baselined, 2 silenced", res.stderr)
@@ -201,12 +201,12 @@ class TestInlineIgnore(unittest.TestCase):
 
     def test_an_ignore_comment_in_a_doc_is_text_and_silences_nothing(self):
         with tempfile.TemporaryDirectory() as d:
-            write(d, "notes.md", f"{IGNORE} R13.1 -- shown as an example\n" + SECRET)
+            write(d, "notes.md", f"{IGNORE} R13.1 -- shown as an example\n" + AWS_EXAMPLE_LINE)
             self.assertEqual(run_cli(d, "scan", "notes.md").returncode, 1)
 
     def test_sarif_writes_a_silenced_finding_with_an_in_source_suppression(self):
         with tempfile.TemporaryDirectory() as d:
-            write(d, "src/a.ts", f"{IGNORE} R9.2 -- generated client\n" + TS_IGNORE + SECRET)
+            write(d, "src/a.ts", f"{IGNORE} R9.2 -- generated client\n" + TS_IGNORE + AWS_EXAMPLE_LINE)
             res = run_cli(d, "scan", "--sarif", "out.sarif")
             self.assertEqual(res.returncode, 1)
             results = json.loads(read(d, "out.sarif"))["runs"][0]["results"]
@@ -228,7 +228,7 @@ class TestNewSuppressions(unittest.TestCase):
 
     def test_a_diff_that_adds_baseline_entries_is_reported_and_one_that_drops_them_is_not(self):
         with tempfile.TemporaryDirectory() as d:
-            committed_repo(d, {"src/a.ts": SECRET})
+            committed_repo(d, {"src/a.ts": AWS_EXAMPLE_LINE})
             run_cli(d, "baseline")
             res = run_cli(d, "scan", "--diff", "HEAD")
             self.assertEqual(res.returncode, 1)
@@ -250,7 +250,7 @@ class TestMarkdown(unittest.TestCase):
 
     def test_findings_are_a_table_of_rule_place_and_why_and_the_exit_code_follows_fail_on(self):
         with tempfile.TemporaryDirectory() as d:
-            write(d, "src/a.ts", TS_IGNORE + SECRET)
+            write(d, "src/a.ts", TS_IGNORE + AWS_EXAMPLE_LINE)
             res = run_cli(d, "scan", "--format", "markdown")
             self.assertEqual(res.returncode, 1)
             lines = res.stdout.splitlines()
@@ -260,14 +260,14 @@ class TestMarkdown(unittest.TestCase):
 
     def test_rule_ids_link_only_with_a_rules_url(self):
         with tempfile.TemporaryDirectory() as d:
-            write(d, "src/a.ts", SECRET)
+            write(d, "src/a.ts", AWS_EXAMPLE_LINE)
             linked = run_cli(d, "scan", "--format", "markdown", "--rules-url", f"{WEB}example.org/rules/").stdout
             self.assertIn(f"| [R13.1]({WEB}example.org/rules/R13.1) | src/a.ts:1 |", linked)
             self.assertNotIn("](", run_cli(d, "scan", "--format", "markdown").stdout)
 
     def test_a_long_list_is_cut_at_fifty_rows_and_says_how_many_more(self):
         with tempfile.TemporaryDirectory() as d:
-            write(d, "src/a.ts", SECRET * 57)
+            write(d, "src/a.ts", AWS_EXAMPLE_LINE * 57)
             out = report(run_cli(d, "scan", "--format", "markdown").stdout).splitlines()
             self.assertEqual(len([ln for ln in out if ln.startswith("| R13.1 |")]), 50)
             self.assertIn("57 finding(s).", out)
@@ -275,9 +275,9 @@ class TestMarkdown(unittest.TestCase):
 
     def test_the_only_numbers_in_the_text_are_counts_lines_and_rule_ids(self):
         with tempfile.TemporaryDirectory() as d:
-            write(d, "src/a.ts", f"{IGNORE} R9.2 -- generated\n" + TS_IGNORE + SECRET)
+            write(d, "src/a.ts", f"{IGNORE} R9.2 -- generated\n" + TS_IGNORE + AWS_EXAMPLE_LINE)
             run_cli(d, "baseline", "src/a.ts")
-            write(d, "src/b.ts", SECRET)
+            write(d, "src/b.ts", AWS_EXAMPLE_LINE)
             out = run_cli(d, "scan", "--format", "markdown").stdout
             self.assertIn("Not shown: 1 silenced, 1 baselined.", out)
             rest = re.sub(r"R\d+\.\d+|\.ts:\d+|^\d+ finding\(s\)\.$|\d+ silenced|\d+ baselined", "", out, flags=re.M)
@@ -305,7 +305,7 @@ class TestMarkdown(unittest.TestCase):
     def test_a_hostile_file_name_is_escaped_in_the_table(self):
         with tempfile.TemporaryDirectory() as d:
             name = "@octocat\n::error::x <b> [y](http:z) |.ts"
-            write(d, name, SECRET)
+            write(d, name, AWS_EXAMPLE_LINE)
             md = run_cli(d, "scan", "--format", "markdown").stdout
             row = [ln for ln in md.splitlines() if ln.startswith("| R13.1")][0]
             self.assertEqual(row.count(" | "), 2, row)
@@ -324,7 +324,7 @@ class TestMcpScan(unittest.TestCase):
 
     def test_the_mcp_scan_hides_baselined_findings_but_never_honours_an_ignore(self):
         with tempfile.TemporaryDirectory() as d:
-            write(d, "src/a.ts", SECRET + f"{IGNORE} R9.2 -- generated\n" + TS_IGNORE)
+            write(d, "src/a.ts", AWS_EXAMPLE_LINE + f"{IGNORE} R9.2 -- generated\n" + TS_IGNORE)
             run_cli(d, "baseline", "src/a.ts")      # the R9.2 finding is silenced, so only R13.1 is recorded
             reply = self.session(d, ("scan", {"paths": ["src"]}))[0]["result"]
         self.assertEqual(reply["structuredContent"], {"count": 1, "files": 1, "baselined": 1})

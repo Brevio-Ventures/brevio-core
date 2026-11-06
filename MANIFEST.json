@@ -1,7 +1,7 @@
 {
  "schema": 1,
  "version": "0.6.0",
- "harness_commit": "8d5c619bd1b0badd53223297bcdfc9098b7cc751",
+ "harness_commit": "91eecc1395f3eb48525b7ee4d16ada7d4ed7d757",
  "set": "0.6",
  "files": {
   ".github/ISSUE_TEMPLATE/bug.yml": "tools/core_release/.github/ISSUE_TEMPLATE/bug.yml",

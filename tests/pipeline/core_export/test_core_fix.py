@@ -17,7 +17,7 @@ TREE = ROOT
 _EXPORT = tempfile.TemporaryDirectory()
 # A fake key in the AWS access key format (AWS's documented example key ID), joined at run time so this file is not
 # itself a finding of a secret scan. The hardcoded-secret rule (R13.1) flags the format (E35 precision run, 2026-11-05).
-SECRET_LINE = "const apiKey = '" + "AKIA" + "IOSFODNN7EXAMPLE" + "';\n"
+AWS_EXAMPLE_LINE = "const apiKey = '" + "AKIA" + "IOSFODNN7EXAMPLE" + "';\n"
 TS_IGNORE = "// @ts-ignore\nconst n: number = 'x';\n"
 BARE_EXCEPT = "try:\n    run()\nexcept:\n    pass\n"
 # One sample per fixer, by rule id: a file name and a line that triggers the rule.
@@ -75,13 +75,13 @@ class TestFixers(unittest.TestCase):
 class TestFixCommand(unittest.TestCase):
     def test_fix_rewrites_in_place_keeps_the_secret_and_reports_what_remains(self):
         with tempfile.TemporaryDirectory() as d:
-            write(d, "src/a.ts", TS_IGNORE + SECRET_LINE)
+            write(d, "src/a.ts", TS_IGNORE + AWS_EXAMPLE_LINE)
             write(d, "a.py", BARE_EXCEPT.replace("\n", "\r\n"))
             res = run_cli(d, "scan", "--fix")
             self.assertEqual(res.returncode, 1, res.stderr)
             self.assertIn("2 fixed, 1 remaining", res.stderr)
             self.assertIn("src/a.ts:3: [R13.1]", res.stdout)
-            self.assertEqual(read(d, "src/a.ts"), TS_IGNORE.replace("@ts-ignore", "@ts-expect-error") + SECRET_LINE)
+            self.assertEqual(read(d, "src/a.ts"), TS_IGNORE.replace("@ts-ignore", "@ts-expect-error") + AWS_EXAMPLE_LINE)
             self.assertEqual(read(d, "a.py"), BARE_EXCEPT.replace("except:", "except BaseException:").replace("\n", "\r\n"))
 
     def test_fixing_twice_changes_nothing_the_second_time(self):
@@ -131,7 +131,7 @@ class TestFixTool(unittest.TestCase):
 
     def test_the_fix_tool_returns_the_diff_and_writes_only_when_asked(self):
         with tempfile.TemporaryDirectory() as d:
-            write(d, "src/a.ts", TS_IGNORE + SECRET_LINE)
+            write(d, "src/a.ts", TS_IGNORE + AWS_EXAMPLE_LINE)
             dry, wrote = self.session(d, {"paths": ["src"]}, {"paths": ["src"], "write": True})
             self.assertFalse(dry["isError"])
             self.assertIn("+// @ts-expect-error", dry["structuredContent"]["diff"])
@@ -139,7 +139,7 @@ class TestFixTool(unittest.TestCase):
             self.assertFalse(dry["structuredContent"]["written"])
             self.assertTrue(wrote["structuredContent"]["written"])
             self.assertEqual(wrote["structuredContent"]["remaining"], 1)
-            self.assertEqual(read(d, "src/a.ts"), TS_IGNORE.replace("@ts-ignore", "@ts-expect-error") + SECRET_LINE)
+            self.assertEqual(read(d, "src/a.ts"), TS_IGNORE.replace("@ts-ignore", "@ts-expect-error") + AWS_EXAMPLE_LINE)
 
     def test_the_fix_tool_refuses_a_path_outside_the_folder_and_a_bad_write_flag(self):
         with tempfile.TemporaryDirectory() as d, tempfile.TemporaryDirectory() as other:

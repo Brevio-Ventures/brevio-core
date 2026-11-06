@@ -28,7 +28,7 @@ WAITLIST = "https://brevio.pro/teams?ref=cli"
 LINE = "Teams: share learned guards and suppression approvals across repos — https://brevio.pro/teams?ref="
 # A fake key in the AWS access key format (AWS's documented example key ID), joined at run time so this file is not
 # itself a finding of a secret scan. The hardcoded-secret rule (R13.1) flags the format (E35 precision run, 2026-11-05).
-SECRET = "const apiKey = '" + "AKIA" + "IOSFODNN7EXAMPLE" + "';\n"
+AWS_EXAMPLE_LINE = "const apiKey = '" + "AKIA" + "IOSFODNN7EXAMPLE" + "';\n"
 # The absolute claims the public text may not make outside its scoped form (ROADMAP E39), and words that promise.
 ABSOLUTE = re.compile(r"\bno network\b|\bnothing\b|\bnever\b|\balways\b|\bevery\b|\ball\b|\bguarantee|\bzero\b|\bonly\b",
                       re.I)
@@ -115,7 +115,7 @@ class TestUp(unittest.TestCase):
 class TestTheTeamsLine(unittest.TestCase):
     def test_the_markdown_report_ends_with_the_line_and_the_flag_leaves_it_out(self):
         with tempfile.TemporaryDirectory() as d:
-            write(d, "a.ts", SECRET)
+            write(d, "a.ts", AWS_EXAMPLE_LINE)
             on = run_cli(d, "scan", "--format", "markdown", "a.ts")
             self.assertEqual(on.returncode, 1, on.stderr)
             self.assertEqual(on.stdout.splitlines()[-1], LINE + "pr-comment")
@@ -134,13 +134,13 @@ class TestTheTeamsLine(unittest.TestCase):
 
     def test_no_text_or_agent_output_carries_the_line(self):
         with tempfile.TemporaryDirectory() as d:
-            write(d, "a.ts", SECRET)
+            write(d, "a.ts", AWS_EXAMPLE_LINE)
             for fmt in ("text", "agent"):
                 self.assertNotIn("Teams:", run_cli(d, "scan", "--format", fmt, "a.ts").stdout, fmt)
 
     def test_the_agent_hook_never_carries_the_line(self):
         with tempfile.TemporaryDirectory() as d:
-            path = write(d, "a.ts", SECRET)
+            path = write(d, "a.ts", AWS_EXAMPLE_LINE)
             edit = {"cwd": d, "hook_event_name": "PostToolUse", "tool_name": "Write", "tool_input": {"file_path": path}}
             res = run_cli(d, "hook", "run", "--event", "post-edit", stdin=json.dumps(edit))
             self.assertIn("[R13.1]", json.loads(res.stdout)["reason"], res.stderr)
@@ -155,7 +155,7 @@ class TestTheTeamsLine(unittest.TestCase):
         msgs = [{"jsonrpc": "2.0", "id": 1, "method": "initialize", "params": {"protocolVersion": "2025-06-18", "capabilities": {}}},
                 {"jsonrpc": "2.0", "id": 2, "method": call, "params": {"name": "scan", "arguments": {"paths": ["a.ts"]}}}]
         with tempfile.TemporaryDirectory() as d:
-            write(d, "a.ts", SECRET)
+            write(d, "a.ts", AWS_EXAMPLE_LINE)
             res = run_cli(d, "mcp", stdin="".join(json.dumps(m) + "\n" for m in msgs))
         self.assertIn("R13.1", res.stdout, res.stderr)
         self.assertNotIn("brevio.pro/teams", res.stdout)
@@ -163,7 +163,7 @@ class TestTheTeamsLine(unittest.TestCase):
     def test_the_line_holds_no_number_and_no_absolute_claim(self):
         with tempfile.TemporaryDirectory() as d:
             lines = [run_cli(d, "gain").stdout.splitlines()[-1]]
-            write(d, "a.ts", SECRET)
+            write(d, "a.ts", AWS_EXAMPLE_LINE)
             lines.append(run_cli(d, "scan", "--format", "markdown", "a.ts").stdout.splitlines()[-1])
         for line in lines:
             self.assertTrue(line.startswith("Teams: "), line)

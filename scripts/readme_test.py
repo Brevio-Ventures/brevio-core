@@ -34,10 +34,10 @@ FENCE = re.compile(r"^(?P<indent>\s*)```(?:sh|bash)\s*$")
 SCAN = re.compile(r"\bbrevio-core\s+scan\b")
 PLANTED_PATH = "src/config.ts"
 PLANTED_RULE = "R13.1"
-# The same synthetic secret the exported CLI tests plant: AWS's documented example key ID, a fake in a credential
+# The same synthetic pattern the exported CLI tests plant: AWS's documented example key ID, a fake in a credential
 # format the hardcoded-secret rule matches. It is joined at run time so this file is not itself a finding when the
 # gate scans a change to it.
-SECRET_LINE = "const apiKey = '" + "AKIA" + "IOSFODNN7EXAMPLE" + "';\n"
+PLANTED_R131_LINE = "const apiKey = '" + "AKIA" + "IOSFODNN7EXAMPLE" + "';\n"
 TIMEOUT = 600
 
 
@@ -90,7 +90,7 @@ def plant(repo: str) -> None:
     path = os.path.join(repo, *PLANTED_PATH.split("/"))
     os.makedirs(os.path.dirname(path), exist_ok=True)
     with open(path, "w", encoding="utf-8", newline="\n") as fh:
-        fh.write(SECRET_LINE)
+        fh.write(PLANTED_R131_LINE)
 
 
 def run_block(bash: str, repo: str, block: Block, scratch: str) -> subprocess.CompletedProcess:

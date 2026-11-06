@@ -21,9 +21,9 @@ TREE = ROOT
 _RUN = "import sys; sys.path.insert(0, sys.argv[1]); from brevio.pipeline import core_cli; raise SystemExit(core_cli.main(sys.argv[2:]))"
 # A fake key in the AWS access key format (AWS's documented example key ID), joined at run time so this file is not
 # itself a finding of a secret scan. The hardcoded-secret rule (R13.1) flags the format (E35 precision run, 2026-11-05).
-SECRET = "const apiKey = '" + "AKIA" + "IOSFODNN7EXAMPLE" + "';\n"
+AWS_EXAMPLE_LINE = "const apiKey = '" + "AKIA" + "IOSFODNN7EXAMPLE" + "';\n"
 CLEAN = "export const add = (a: number, b: number): number => a + b;\n"
-IGNORED = "// brevio-core: ignore R13.1 -- a test key\n" + SECRET
+IGNORED = "// brevio-core: ignore R13.1 -- a test key\n" + AWS_EXAMPLE_LINE
 CURSOR_VERSION = "9.9.9"
 LATENCY_LIMIT = 1.5     # CPU seconds for a whole post-edit hook run on a 2,000-line file, interpreter start included
 _BIN = tempfile.TemporaryDirectory()
@@ -177,7 +177,7 @@ class TestClaudeCode(unittest.TestCase):
     def test_an_edit_that_adds_a_secret_is_blocked_with_the_finding_and_its_fix_hint(self):
         with tempfile.TemporaryDirectory() as d:
             repo(d, src__a_ts=CLEAN)
-            res = fire(d, "claude_code", "PostToolUse", claude_edit(d, "src/a.ts", CLEAN, CLEAN + SECRET))
+            res = fire(d, "claude_code", "PostToolUse", claude_edit(d, "src/a.ts", CLEAN, CLEAN + AWS_EXAMPLE_LINE))
             self.assertEqual(res.returncode, 0, res.stderr)
             out = json.loads(res.stdout)
             self.assertEqual(out["decision"], "block")
@@ -192,7 +192,7 @@ class TestClaudeCode(unittest.TestCase):
 
     def test_an_edit_reports_only_the_lines_it_changed(self):
         with tempfile.TemporaryDirectory() as d:
-            repo(d, src__a_ts=SECRET + CLEAN)
+            repo(d, src__a_ts=AWS_EXAMPLE_LINE + CLEAN)
             res = fire(d, "claude_code", "PostToolUse", claude_edit(d, "src/a.ts", CLEAN, CLEAN + CLEAN))
             self.assertEqual((res.returncode, res.stdout), (0, ""), res.stderr)
 
@@ -206,9 +206,9 @@ class TestClaudeCode(unittest.TestCase):
 
     def test_a_new_file_outside_git_is_scanned_whole(self):
         with tempfile.TemporaryDirectory() as d:
-            path = write(d, "new.ts", CLEAN + SECRET)
+            path = write(d, "new.ts", CLEAN + AWS_EXAMPLE_LINE)
             event = {**claude_edit(d, "new.ts", CLEAN, CLEAN), "tool_name": "Write",
-                     "tool_input": {"file_path": path, "content": CLEAN + SECRET}}
+                     "tool_input": {"file_path": path, "content": CLEAN + AWS_EXAMPLE_LINE}}
             res = fire(d, "claude_code", "PostToolUse", event)
             self.assertIn("new.ts:2 [R13.1]", json.loads(res.stdout)["reason"])
 
@@ -220,18 +220,18 @@ class TestClaudeCode(unittest.TestCase):
                 write(d, rel, text)
             repo(d)
             for rel in files:
-                res = fire(d, "claude_code", "PostToolUse", claude_edit(d, rel, CLEAN, CLEAN + SECRET))
+                res = fire(d, "claude_code", "PostToolUse", claude_edit(d, rel, CLEAN, CLEAN + AWS_EXAMPLE_LINE))
                 self.assertEqual((res.returncode, res.stdout), (0, ""), rel)
 
     def test_an_edit_outside_the_project_is_not_scanned(self):
         """An absolute path or a symlink that resolves outside the project says nothing (ported from a parallel fix)."""
         with tempfile.TemporaryDirectory() as d, tempfile.TemporaryDirectory() as elsewhere:
             repo(d, src__a_ts=CLEAN)
-            outside = write(elsewhere, "secret.ts", SECRET)
+            outside = write(elsewhere, "probe.ts", AWS_EXAMPLE_LINE)
             os.symlink(outside, os.path.join(d, "src", "link.ts"))
             for path in (outside, os.path.join(d, "src", "link.ts"), os.path.join(d, "src", "..", "..", "x.ts")):
                 event = {**claude_edit(d, "src/a.ts", CLEAN, CLEAN), "tool_name": "Write",
-                         "tool_input": {"file_path": path, "content": SECRET}}
+                         "tool_input": {"file_path": path, "content": AWS_EXAMPLE_LINE}}
                 res = fire(d, "claude_code", "PostToolUse", event)
                 self.assertEqual((res.returncode, res.stdout), (0, ""), path)
 
@@ -239,7 +239,7 @@ class TestClaudeCode(unittest.TestCase):
         """Claude Code runs the hook in the session's current folder; the hook finds the project root itself."""
         with tempfile.TemporaryDirectory() as d:
             repo(d, src__a_ts=CLEAN, docs__keep_ts=CLEAN)
-            event = {**claude_edit(d, "src/a.ts", CLEAN, CLEAN + SECRET), "cwd": os.path.join(d, "docs")}
+            event = {**claude_edit(d, "src/a.ts", CLEAN, CLEAN + AWS_EXAMPLE_LINE), "cwd": os.path.join(d, "docs")}
             assert run_cli(d, "hook", "install", "--target", "claude_code").returncode == 0
             res = run_cli(os.path.join(d, "docs"), *installed_command(d, "claude_code", "PostToolUse"),
                           stdin=json.dumps(event))
@@ -248,7 +248,7 @@ class TestClaudeCode(unittest.TestCase):
     def test_stop_blocks_once_on_the_uncommitted_changes_and_never_when_a_stop_hook_already_continued(self):
         with tempfile.TemporaryDirectory() as d:
             repo(d, src__a_ts=CLEAN)
-            write(d, "src/b.ts", SECRET)
+            write(d, "src/b.ts", AWS_EXAMPLE_LINE)
             first = fire(d, "claude_code", "Stop", claude_stop(d))
             out = json.loads(first.stdout)
             self.assertEqual(out["decision"], "block")
@@ -268,7 +268,7 @@ class TestCursor(unittest.TestCase):
     def test_a_write_that_adds_a_secret_comes_back_as_additional_context(self):
         with tempfile.TemporaryDirectory() as d:
             repo(d, src__a_ts=CLEAN)
-            path = write(d, "src/a.ts", CLEAN + SECRET)
+            path = write(d, "src/a.ts", CLEAN + AWS_EXAMPLE_LINE)
             res = fire(d, "cursor", "postToolUse", cursor_event(d, "postToolUse", tool_name="Write", cwd=d,
                                                                   tool_input={"file_path": path}, tool_output="{}"))
             self.assertIn("src/a.ts:2 [R13.1]", json.loads(res.stdout)["additional_context"], res.stderr)
@@ -276,7 +276,7 @@ class TestCursor(unittest.TestCase):
     def test_stop_asks_for_one_follow_up_and_then_lets_the_agent_finish(self):
         with tempfile.TemporaryDirectory() as d:
             repo(d, src__a_ts=CLEAN)
-            write(d, "src/a.ts", CLEAN + SECRET)
+            write(d, "src/a.ts", CLEAN + AWS_EXAMPLE_LINE)
             first = fire(d, "cursor", "stop", cursor_event(d, "stop", status="completed", loop_count=0))
             self.assertIn("[R13.1]", json.loads(first.stdout)["followup_message"])
             again = fire(d, "cursor", "stop", cursor_event(d, "stop", status="completed", loop_count=1))
@@ -285,7 +285,7 @@ class TestCursor(unittest.TestCase):
     def test_claude_codes_hook_run_by_cursor_stays_quiet_when_cursors_own_hook_is_installed(self):
         with tempfile.TemporaryDirectory() as d:
             repo(d, src__a_ts=CLEAN)
-            path = write(d, "src/a.ts", CLEAN + SECRET)
+            path = write(d, "src/a.ts", CLEAN + AWS_EXAMPLE_LINE)
             event = cursor_event(d, "postToolUse", tool_name="Write", tool_input={"file_path": path})
             alone = fire(d, "claude_code", "PostToolUse", event)
             self.assertIn("[R13.1]", json.loads(alone.stdout)["additional_context"])
@@ -334,7 +334,7 @@ class TestLearnAfterAFixCommit(unittest.TestCase):
     def test_the_shell_hook_never_scans(self):
         with tempfile.TemporaryDirectory() as d:
             repo(d, src__a_ts=CLEAN)
-            write(d, "src/a.ts", CLEAN + SECRET)
+            write(d, "src/a.ts", CLEAN + AWS_EXAMPLE_LINE)
             res = fire(d, "claude_code", "PostToolUse", claude_bash(d, "git commit -am 'Fix totals'"), shell=True)
             self.assertNotIn("R13.1", res.stdout)
             self.assertIn("learn", json.loads(res.stdout)["hookSpecificOutput"]["additionalContext"])
@@ -362,7 +362,7 @@ class TestFailOpen(unittest.TestCase):
     def test_a_scan_past_its_budget_exits_0_with_one_line(self):
         with tempfile.TemporaryDirectory() as d:
             repo(d)
-            write(d, "a.ts", SECRET)
+            write(d, "a.ts", AWS_EXAMPLE_LINE)
             res = run_cli(d, "hook", "run", "--event", "stop", "--budget", "0", stdin=json.dumps(claude_stop(d)))
             self.assertEqual((res.returncode, res.stdout), (0, ""))
             self.assertEqual(res.stderr, "brevio-core hook: skipped, the scan took longer than 0 s\n")
@@ -376,7 +376,7 @@ class TestFailOpen(unittest.TestCase):
                      "raise SystemExit(core_hook.main(sys.argv[2:]))")
         with tempfile.TemporaryDirectory() as d:
             repo(d)
-            write(d, "a.ts", SECRET)
+            write(d, "a.ts", AWS_EXAMPLE_LINE)
             res = subprocess.run([sys.executable, "-I", "-c", late_wake, TREE, "--event", "stop", "--budget", "0"], cwd=d,
                                  input=json.dumps(claude_stop(d)), capture_output=True, text=True, timeout=60,
                                  env={"PATH": _BIN.name, "HOME": d})
@@ -388,7 +388,7 @@ class TestFailOpen(unittest.TestCase):
             repo(d, src__a_ts=CLEAN)
             write(d, ".brevio/baseline.json", "{ not json")
             res = run_cli(d, "hook", "run", "--event", "post-edit",
-                          stdin=json.dumps(claude_edit(d, "src/a.ts", CLEAN, CLEAN + SECRET)))
+                          stdin=json.dumps(claude_edit(d, "src/a.ts", CLEAN, CLEAN + AWS_EXAMPLE_LINE)))
             self.assertEqual((res.returncode, res.stdout), (0, ""))
             self.assertIn("skipped after an internal error", res.stderr)
 
@@ -399,7 +399,7 @@ class TestLatency(unittest.TestCase):
             body = "".join(f"export const v{i} = {i};\n" for i in range(2000))
             repo(d, src__big_ts=body)
             edited = body.replace(" = ", " =  ")      # every line changed
-            path = write(d, "src/big.ts", edited[:-len("export const v1999 =  1999;\n")] + SECRET)
+            path = write(d, "src/big.ts", edited[:-len("export const v1999 =  1999;\n")] + AWS_EXAMPLE_LINE)
             event = {**claude_edit(d, "src/big.ts", "\0", "\0"), "tool_input": {"file_path": path}}
             self.assertEqual(run_cli(d, "hook", "install", "--target", "claude_code").returncode, 0)
             argv = installed_command(d, "claude_code", "PostToolUse")
@@ -416,7 +416,7 @@ class TestLatency(unittest.TestCase):
 class TestAgentFormat(unittest.TestCase):
     def test_agent_lines_are_grouped_by_rule_with_a_fix_hint_and_cut_at_20(self):
         with tempfile.TemporaryDirectory() as d:
-            write(d, "a.ts", SECRET * 15 + "// @ts-ignore\n" * 10)
+            write(d, "a.ts", AWS_EXAMPLE_LINE * 15 + "// @ts-ignore\n" * 10)
             res = run_cli(d, "scan", "--format", "agent", "a.ts")
             lines = res.stdout.splitlines()
             self.assertEqual(res.returncode, 1, res.stderr)

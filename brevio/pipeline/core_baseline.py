@@ -26,7 +26,7 @@ SUPPRESSION_MESSAGE = "new suppression: needs a human review"
 CI_ONLY = " (an ignore comment counts in CI only, not here)"
 _ID = r"[A-Za-z]+\d+(?:\.\d+)*"
 _DIRECTIVE = re.compile(rf"brevio-core:\s*ignore\s+(?P<rules>{_ID}(?:[\s,]+{_ID})*)(?P<rest>.*)$")
-_CLOSER = re.compile(r"(?:\*/\s*\}?|-->|%\}|\}\})\s*$")     # the end of a /* */, <!-- -->, {/* */} or template comment
+_CLOSER = re.compile(r"(?:\*/\s*\}?|--!?>|%\}|\}\})\s*$")     # the end of a /* */, <!-- -->, {/* */} or template comment
 
 Key = tuple[str, str, str]              # path, rule ID, sha256 of the stripped line
 Numbered = dict[str, list[tuple[int, str]]]

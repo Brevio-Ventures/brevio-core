@@ -71,8 +71,11 @@ jobs:
             || cp scripts/manifest_check.py "$RUNNER_TEMP/manifest_check.py"
           python3 "$RUNNER_TEMP/manifest_check.py" --base "$BASE_SHA"
   gate:
-    # The Action, run on this repository's own pull requests.
-    if: github.event_name == 'pull_request'
+    # The Action, run on this repository's own pull requests. A release pull request replaces every file and is not
+    # checked by the scan: the export holds the rule documentation and tests that plant these patterns on purpose.
+    if: >-
+      github.event_name == 'pull_request' &&
+      !(startsWith(github.head_ref, 'release-') && github.event.pull_request.head.repo.full_name == github.repository)
     runs-on: ubuntu-latest
     permissions:
       contents: read

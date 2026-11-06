@@ -15,7 +15,7 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.dirname(os.path.dirname(os.path.dirname(HERE)))
 # A fake key in the AWS access key format (AWS's documented example key ID), joined at run time so this file is not
 # itself a finding of a secret scan. The hardcoded-secret rule (R13.1) flags the format (E35 precision run, 2026-11-05).
-SECRET_LINE = "const apiKey = '" + "AKIA" + "IOSFODNN7EXAMPLE" + "';\n"
+AWS_EXAMPLE_LINE = "const apiKey = '" + "AKIA" + "IOSFODNN7EXAMPLE" + "';\n"
 CLEAN_LINE = "export const add = (a: number, b: number): number => a + b;\n"
 _RUN = "import sys; sys.path.insert(0, sys.argv[1]); from brevio.pipeline import core_cli; raise SystemExit(core_cli.main(sys.argv[2:]))"
 
@@ -39,7 +39,7 @@ def git(d, *args):
 class TestScanCommand(unittest.TestCase):
     def test_a_planted_secret_fails_the_scan_and_a_clean_file_passes(self):
         with tempfile.TemporaryDirectory() as d:
-            write(d, "src/bad.ts", SECRET_LINE)
+            write(d, "src/bad.ts", AWS_EXAMPLE_LINE)
             write(d, "src/ok.ts", CLEAN_LINE)
             bad = run_cli(d, "scan", "src/bad.ts")
             self.assertEqual(bad.returncode, 1, bad.stderr)
@@ -53,16 +53,16 @@ class TestScanCommand(unittest.TestCase):
             write(d, "app.ts", CLEAN_LINE)
             git(d, "add", "-A")
             git(d, "commit", "-qm", "base")
-            write(d, "build/lib/pkg/x.py", SECRET_LINE)
-            write(d, "pkg.egg-info/x.py", SECRET_LINE)
+            write(d, "build/lib/pkg/x.py", AWS_EXAMPLE_LINE)
+            write(d, "pkg.egg-info/x.py", AWS_EXAMPLE_LINE)
             r = run_cli(d, "scan", "--diff", "HEAD")
             self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
-            write(d, "src/y.ts", SECRET_LINE)
+            write(d, "src/y.ts", AWS_EXAMPLE_LINE)
             self.assertEqual(run_cli(d, "scan", "--diff", "HEAD").returncode, 1)
 
     # Third-party code kept in a repository gave most false positives of the E35 precision run: Playwright keeps
     # minified and bundled builds as test assets (docs/benchmarks/precision.md, 2026-11-05).
-    UPSTREAM = {"third_party/lib/a.ts": SECRET_LINE, "third-party/b.js": "eval(code);\n", "src/vendor/c.ts": SECRET_LINE,
+    UPSTREAM = {"third_party/lib/a.ts": AWS_EXAMPLE_LINE, "third-party/b.js": "eval(code);\n", "src/vendor/c.ts": AWS_EXAMPLE_LINE,
                 "assets/modernizr.min.js": "eval(code);\n", "assets/lib.min.mjs": "eval(code);\n",
                 "static/js/main.3f2a1b9c.chunk.js": "eval(code);\n", "dist2/app.bundle.js": "eval(code);\n",
                 "out/index-4be0c13d.js": "eval(code);\n",
@@ -72,7 +72,7 @@ class TestScanCommand(unittest.TestCase):
         with tempfile.TemporaryDirectory() as d:
             for rel, text in self.UPSTREAM.items():
                 write(d, rel, text)
-            write(d, "src/own.ts", "const header = 'x';\n" + SECRET_LINE)
+            write(d, "src/own.ts", "const header = 'x';\n" + AWS_EXAMPLE_LINE)
             write(d, "src/index-page.js", "eval(code);\n")          # a word after the dash, not a hash
             res = run_cli(d, "scan")
             self.assertEqual(res.returncode, 1, res.stderr)
@@ -100,7 +100,7 @@ class TestScanCommand(unittest.TestCase):
             git(d, "add", "-A")
             git(d, "commit", "-qm", "base")
             for rel in ("types/protocol.d.ts", "types/index.d.mts", "types/index.d.cts"):
-                write(d, rel, prose + SECRET_LINE)
+                write(d, rel, prose + AWS_EXAMPLE_LINE)
             for args in (("scan",), ("scan", "types"), ("scan", "--file", "types/protocol.d.ts"), ("scan", "--diff", "HEAD")):
                 r = run_cli(d, *args)
                 self.assertEqual((r.returncode, r.stdout), (0, ""), args)
@@ -109,8 +109,8 @@ class TestScanCommand(unittest.TestCase):
 
     def test_a_folder_is_walked_and_the_default_is_the_current_folder(self):
         with tempfile.TemporaryDirectory() as d:
-            write(d, "src/deep/bad.ts", SECRET_LINE)
-            write(d, "node_modules/pkg/bad.ts", SECRET_LINE)
+            write(d, "src/deep/bad.ts", AWS_EXAMPLE_LINE)
+            write(d, "node_modules/pkg/bad.ts", AWS_EXAMPLE_LINE)
             res = run_cli(d, "scan")
             self.assertEqual(res.returncode, 1)
             self.assertIn("src/deep/bad.ts", res.stdout)
@@ -118,7 +118,7 @@ class TestScanCommand(unittest.TestCase):
 
     def test_the_agent_hook_form_scan_file_is_accepted(self):
         with tempfile.TemporaryDirectory() as d:
-            write(d, "a.ts", SECRET_LINE)
+            write(d, "a.ts", AWS_EXAMPLE_LINE)
             write(d, "b.ts", CLEAN_LINE)
             self.assertEqual(run_cli(d, "scan", "--file", "a.ts").returncode, 1)
             self.assertEqual(run_cli(d, "scan", "--file", "b.ts").returncode, 0)
@@ -131,7 +131,7 @@ class TestScanCommand(unittest.TestCase):
 
     def test_sarif_is_written_to_the_named_file_with_the_rule_and_line(self):
         with tempfile.TemporaryDirectory() as d:
-            write(d, "src/bad.ts", CLEAN_LINE + SECRET_LINE)
+            write(d, "src/bad.ts", CLEAN_LINE + AWS_EXAMPLE_LINE)
             res = run_cli(d, "scan", "src/bad.ts", "--sarif", "out.sarif")
             self.assertEqual(res.returncode, 1)
             with open(os.path.join(d, "out.sarif"), encoding="utf-8") as fh:
@@ -145,12 +145,12 @@ class TestScanCommand(unittest.TestCase):
     def test_diff_mode_flags_only_the_lines_added_against_the_base(self):
         with tempfile.TemporaryDirectory() as d:
             git(d, "init", "-q", "-b", "main")
-            write(d, "src/old.ts", SECRET_LINE)    # already on main: not this change's problem
+            write(d, "src/old.ts", AWS_EXAMPLE_LINE)    # already on main: not this change's problem
             git(d, "add", ".")
             git(d, "commit", "-q", "-m", "base")
             self.assertEqual(run_cli(d, "scan", "--diff", "main").returncode, 0)
-            write(d, "src/new.ts", CLEAN_LINE + SECRET_LINE)
-            write(d, "src/old.ts", SECRET_LINE + "eval('2 + 2');\n")
+            write(d, "src/new.ts", CLEAN_LINE + AWS_EXAMPLE_LINE)
+            write(d, "src/old.ts", AWS_EXAMPLE_LINE + "eval('2 + 2');\n")
             res = run_cli(d, "scan", "--diff", "main")
             self.assertEqual(res.returncode, 1, res.stderr)
             self.assertIn("src/new.ts:2: [R13.1]", res.stdout)
