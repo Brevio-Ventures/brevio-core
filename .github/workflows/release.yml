@@ -1,39 +1,209 @@
 name: Release
-# Publishes to PyPI through trusted publishing (OIDC). No credential is stored in this repository.
+# Publishes a tagged version. PyPI and the MCP registry take the workflow's OIDC identity, the GitHub release and the
+# major tag use the workflow's own token, and the only stored credential is the optional skill-registry token.
+# Each job holds only the permissions it needs: none holds both id-token: write and contents: write, the build job
+# writes nothing, and the jobs after it run no code from this tree (the build job prepares every file they publish).
 on:
   push:
-    tags: ['v*']
-permissions:
-  contents: read
+    tags: ['v[0-9]+.[0-9]+.[0-9]+']   # full versions only: the moving v0 tag must not start a release
+permissions: {}
 jobs:
   build:
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    outputs:
+      commit: ${{ steps.commit.outputs.sha }}
+      version: ${{ steps.commit.outputs.version }}
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5.6.0
         with:
           python-version: '3.12'
       - name: The tag matches VERSION
         run: test "$GITHUB_REF_NAME" = "v$(cat VERSION)"
+      - name: The release commit
+        id: commit
+        run: |
+          echo "sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+          echo "version=$(cat VERSION)" >> "$GITHUB_OUTPUT"
       - name: Tests
         run: python -m unittest discover -s tests/pipeline/core_export -t .
-      - name: Build
+      - name: Build toolchain, pinned by hash
         run: |
-          python -m pip install --quiet build
-          python -m build
-      - uses: actions/upload-artifact@v4
+          python -m pip install --quiet --require-hashes --only-binary :all: -r scripts/build-requirements.txt
+      - name: Build
+        run: python -m build --no-isolation
+      - name: Release assets (the .pyz, its SBOM, the notes and the listing files)
+        env:
+          COMMIT: ${{ steps.commit.outputs.sha }}
+        run: |
+          python -m pip install --quiet --no-deps --no-compile --target pyz-root dist/*.whl
+          python scripts/release_assets.py --from pyz-root --out assets --commit "$COMMIT" --repo "$GITHUB_REPOSITORY" \
+            --dist dist
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: dist
           path: dist/
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: assets
+          path: assets/
   publish:
+    # PyPI, by trusted publishing. The environment's reviewers approve each release.
     needs: build
     runs-on: ubuntu-latest
     environment: brevio-core-pypi
     permissions:
       id-token: write
     steps:
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
         with:
           name: dist
           path: dist/
-      - uses: pypa/gh-action-pypi-publish@release/v1
+      - uses: pypa/gh-action-pypi-publish@7245906fb61fa33a13554f9d5fb856fe61758086 # v1.14.3
+  attest:
+    # A build-provenance attestation of the .pyz; its bundle is attached to the release.
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      id-token: write
+      attestations: write
+    steps:
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          name: assets
+          path: assets/
+      - id: attest
+        uses: actions/attest-build-provenance@e8998f949152b193b063cb0ec769d69d929409be # v2.4.0
+        with:
+          subject-path: assets/brevio-core.pyz
+      - name: Keep the bundle
+        env:
+          BUNDLE: ${{ steps.attest.outputs.bundle-path }}
+        run: |
+          mkdir -p attestation
+          cp "$BUNDLE" attestation/brevio-core.pyz.sigstore.json
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: attestation
+          path: attestation/
+  github-release:
+    # After PyPI: notes generated from the commits, after RELEASE.md and the checksums; the .pyz, its attestation
+    # and the SBOM attached. A rerun uploads the files again instead of failing.
+    needs: [build, publish, attest]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          name: assets
+          path: assets/
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          name: attestation
+          path: attestation/
+      - name: Create the release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ github.ref_name }}
+          VERSION: ${{ needs.build.outputs.version }}
+        run: |
+          files=(assets/brevio-core.pyz attestation/brevio-core.pyz.sigstore.json assets/brevio-core.cdx.json)
+          if gh release view "$TAG" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            gh release upload "$TAG" "${files[@]}" --clobber --repo "$GITHUB_REPOSITORY"
+          else
+            gh release create "$TAG" "${files[@]}" --repo "$GITHUB_REPOSITORY" --verify-tag \
+              --title "brevio-core $VERSION" --generate-notes --notes-file assets/notes.md
+          fi
+  move-major-tag:
+    # Points the moving major tag (v0 until 1.0) at the release commit, once the environment's reviewers approve.
+    needs: [build, publish, github-release]
+    runs-on: ubuntu-latest
+    environment: brevio-core-major-tag
+    permissions:
+      contents: write
+    steps:
+      - name: Move the major tag
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ github.ref_name }}
+          COMMIT: ${{ needs.build.outputs.commit }}
+        run: |
+          major="${TAG%%.*}"
+          if gh api "repos/$GITHUB_REPOSITORY/git/ref/tags/$major" >/dev/null 2>&1; then
+            gh api -X PATCH "repos/$GITHUB_REPOSITORY/git/refs/tags/$major" -f sha="$COMMIT" -F force=true
+          else
+            gh api -X POST "repos/$GITHUB_REPOSITORY/git/refs" -f ref="refs/tags/$major" -f sha="$COMMIT"
+          fi
+          echo "$major now points at $COMMIT"
+  mcp-registry:
+    # The MCP registry checks the package on PyPI, so this runs after it. The login is the workflow's OIDC identity.
+    needs: [build, publish]
+    runs-on: ubuntu-latest
+    environment: mcp-registry
+    permissions:
+      id-token: write
+    env:
+      MCP_PUBLISHER_VERSION: '1.8.7'
+      MCP_PUBLISHER_SHA256: 00b21004149a4ce66f0782508ae4a2bce67d1bea395a8da0bd8028159fb59579   # linux_amd64
+    steps:
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          name: assets
+          path: assets/
+      - name: Publish server.json
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          if [ ! -f assets/server.json ]; then
+            echo "::notice::this release ships no MCP server, so there is nothing to publish"
+            exit 0
+          fi
+          gh release download "v$MCP_PUBLISHER_VERSION" --repo modelcontextprotocol/registry \
+            --pattern mcp-publisher_linux_amd64.tar.gz --output mcp-publisher.tar.gz
+          echo "$MCP_PUBLISHER_SHA256  mcp-publisher.tar.gz" | sha256sum -c -
+          tar xzf mcp-publisher.tar.gz mcp-publisher
+          ./mcp-publisher login github-oidc
+          # PyPI can take a few minutes to show a new version to the registry's check.
+          for attempt in 1 2 3 4 5; do
+            ./mcp-publisher publish assets/server.json && exit 0
+            echo "attempt $attempt failed, retrying"
+            sleep 60
+          done
+          exit 1
+  clawhub:
+    # The agent skill, without its licence line, to the skill registry. Skipped when no CLAWHUB_TOKEN is set.
+    needs: [build, publish]
+    runs-on: ubuntu-latest
+    environment: clawhub
+    permissions: {}
+    env:
+      CLAWHUB_VERSION: '0.25.1'
+      CLAWHUB_DISABLE_TELEMETRY: '1'
+    steps:
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          name: assets
+          path: assets/
+      - name: Publish the skill
+        env:
+          CLAWHUB_TOKEN: ${{ secrets.CLAWHUB_TOKEN }}
+          VERSION: ${{ needs.build.outputs.version }}
+          COMMIT: ${{ needs.build.outputs.commit }}
+        run: |
+          if [ -z "$CLAWHUB_TOKEN" ]; then
+            echo "::notice::no CLAWHUB_TOKEN in the clawhub environment, so the skill is not published"
+            exit 0
+          fi
+          if [ ! -f assets/skill/brevio-core/SKILL.md ]; then
+            echo "::notice::this release ships no agent skill, so there is nothing to publish"
+            exit 0
+          fi
+          npm install --global --ignore-scripts --no-audit --no-fund "clawhub@$CLAWHUB_VERSION"
+          clawhub --no-input login --token "$CLAWHUB_TOKEN"
+          clawhub --no-input skill publish assets/skill/brevio-core --slug brevio-core --version "$VERSION" \
+            --source-repo "$GITHUB_REPOSITORY" --source-commit "$COMMIT" --source-path skills/brevio-core

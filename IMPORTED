@@ -1,0 +1,5 @@
+# Commits merged into this repository's main and brought back into the private harness it is exported from.
+# One full commit SHA per line, then the pull request it came from and its contributor's GitHub handle
+# (`<sha> #12 @handle`); CONTRIBUTORS.md is made from these lines. A release is refused while main has a commit
+# after the last release tag that is not listed here (CONTRIBUTING.md, "How this repo works").
+# The release writes this file; a pull request does not edit it.

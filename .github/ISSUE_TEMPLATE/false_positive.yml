@@ -1,0 +1,35 @@
+name: False positive
+description: A finding on code that is correct
+labels: ["false positive"]
+body:
+  - type: markdown
+    attributes:
+      value: >-
+        These reports decide which rules get narrowed or retired, so each one helps. Do not paste secrets, tokens or
+        private code: a line or two that shows the finding is enough.
+  - type: input
+    id: rule
+    attributes:
+      label: Rule ID
+      description: The ID in the finding, for example R9.2.
+    validations:
+      required: true
+  - type: textarea
+    id: line
+    attributes:
+      label: The line that was flagged
+      description: The line, with the file's extension (it decides which rules apply).
+      render: text
+    validations:
+      required: true
+  - type: textarea
+    id: why-correct
+    attributes:
+      label: Why the code is correct
+    validations:
+      required: true
+  - type: input
+    id: version
+    attributes:
+      label: Version
+      description: The output of `pip show brevio-core`, or the Action tag you use.

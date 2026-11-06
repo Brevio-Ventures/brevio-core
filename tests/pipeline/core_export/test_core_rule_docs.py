@@ -3,6 +3,7 @@
 Ships with the portable rule engines: it imports only the standard library and the exported modules, and
 finds the pages in ``docs/rules`` beside the code, in the harness and in the exported tree alike.
 """
+import json
 import os
 import re
 import shutil
@@ -81,6 +82,37 @@ class TestThePagesMatchTheDefinitions(unittest.TestCase):
         page = docs.render("R5.4")
         for head in ("## What it catches", "## Why", "## A bad example", "## A good example", "## How to silence it"):
             self.assertIn(head, page)
+
+    def test_a_page_is_a_search_landing_page_with_the_answer_first(self):
+        text = docs.page("R9.2")
+        front, _sep, body = text[4:].partition("\n---\n")
+        self.assertTrue(text.startswith("---\n"))
+        meta = dict(line.split(": ", 1) for line in front.splitlines())
+        self.assertEqual(json.loads(meta["title"]), "Silenced type errors in TypeScript: why and how to fix")
+        self.assertEqual(json.loads(meta["description"]), docs.answer("R9.2"))
+        self.assertTrue(body.startswith(docs.render("R9.2")))
+        self.assertLess(body.index("**Short answer:**"), body.index("## What it catches"))
+        self.assertEqual(docs.search_title("R1.1"), "Mobile GPU budget in React and TypeScript: why and how to fix")
+
+    def test_related_rules_are_other_rules_of_the_same_group_with_a_page(self):
+        for rid in docs.rule_ids():
+            with self.subTest(rule=rid):
+                rel = docs.related(rid)
+                self.assertNotIn(rid, rel)
+                self.assertLessEqual(len(rel), docs.RELATED)
+                self.assertTrue(all(r.split(".")[0] == rid.split(".")[0] for r in rel))
+                for r in rel:
+                    self.assertIn(f"- [{r}]({docs.filename(r)})", docs.render(rid))
+                    self.assertTrue(os.path.isfile(os.path.join(PAGES, docs.filename(r))))
+
+    def test_the_json_ld_is_a_tech_article_that_cannot_close_its_script_early(self):
+        for rid in docs.rule_ids():
+            block = docs.json_ld(rid)
+            body = block.split("\n")[1]
+            doc = json.loads(body)
+            self.assertEqual((doc["@type"], doc["headline"]), ("TechArticle", docs.search_title(rid)))
+            self.assertNotIn("</", body)
+            self.assertTrue(docs.page(rid).endswith(block))
 
     def test_the_slice_cards_are_read_from_the_code(self):
         cards = docs.card_ids()

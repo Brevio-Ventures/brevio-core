@@ -1,0 +1,42 @@
+name: New rule
+description: A mistake coding agents repeat that a deterministic rule could catch
+labels: ["rule request", "good first issue"]
+body:
+  - type: markdown
+    attributes:
+      value: >-
+        A rule is accepted when it meets the rubric in CONTRIBUTING.md ("Proposing a rule"). The fields below follow it,
+        so whoever picks this up can build the rule and its test from what you write.
+  - type: textarea
+    id: mistake
+    attributes:
+      label: The mistake
+      description: What agents write, and why it is wrong.
+    validations:
+      required: true
+  - type: textarea
+    id: bad
+    attributes:
+      label: A bad line the rule should flag
+      render: text
+    validations:
+      required: true
+  - type: textarea
+    id: good
+    attributes:
+      label: A good line it should not flag
+      render: text
+    validations:
+      required: true
+  - type: textarea
+    id: examples
+    attributes:
+      label: Public examples
+      description: Links to commits, pull requests or issues where an agent made this mistake.
+    validations:
+      required: true
+  - type: textarea
+    id: deterministic
+    attributes:
+      label: Why a fixed pattern can catch it
+      description: What the rule would match on the added lines, and which correct code looks similar.

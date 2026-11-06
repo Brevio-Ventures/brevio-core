@@ -1,0 +1,17 @@
+title: brevio-core
+description: "Catches the mistakes coding agents repeat before they merge: a pull-request gate with no model call and no API key."
+theme: jekyll-theme-minimal
+# Plain Markdown files carry no front matter, so these plugins let Jekyll render them and turn their .md links into pages.
+# jekyll-sitemap writes sitemap.xml for every page; GitHub Pages sets the site's url and baseurl, which it uses
+# (ADOPTION.md E38, 2026-11-05). The theme's SEO tag reads each rule page's front matter title and description.
+plugins:
+  - jekyll-optional-front-matter
+  - jekyll-relative-links
+  - jekyll-readme-index
+  - jekyll-sitemap
+# Each page is served as a folder (rules/R9.2/), so a link that ends in the rule ID alone, as the Action's PR comment
+# writes it, reaches the page (ROADMAP E26, 2026-11-05).
+permalink: pretty
+relative_links:
+  enabled: true
+  collections: false

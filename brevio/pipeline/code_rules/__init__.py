@@ -1,14 +1,17 @@
-"""122 PR-Checkable Zero-Token Code Rules Engine (R1–R19).
+"""PR-Checkable Zero-Token Code Rules Engine (R1–R19).
 
 Pure deterministic AST/regex rule catalog and pre-commit / PR diff scanner.
 Contains zero tenant-derived IP or markers (100% portable for brevio-gate).
 """
 from __future__ import annotations
 
+import math
 import os
 import re
+from collections import Counter
 
-# 122 PR-Checkable Zero-Token Engineering Rules Catalog (R1–R19)
+# PR-Checkable Zero-Token Engineering Rules Catalog (R1–R19). The name keeps the count of the first catalogue: R2.8 was
+# added on 2026-11-05, before the first release, so the eval and raw-HTML findings stop carrying R2.5 (the SSRF guard).
 PR_RULES_122: dict[str, str] = {
     # R1: UI / Mobile Performance (8 rules)
     "R1.1": "Mobile GPU budget: scope blur >=40px to md:/lg: desktop viewports",
@@ -19,7 +22,7 @@ PR_RULES_122: dict[str, str] = {
     "R1.6": "Accessible switch geometry: inline-flex items-center shrink-0 on toggle tracks",
     "R1.7": "LCP asset priority: priority/fetchpriority=high on hero LCP image, lazy below fold",
     "R1.8": "Async polling hygiene: clear intervals on unmount and stop polling on terminal states",
-    # R2: Security & Tenancy (7 rules)
+    # R2: Security & Tenancy (8 rules)
     "R2.1": "Tenant context derivation: derive tenant context from verified session, never client payload",
     "R2.2": "Tenant-scoped data access: every DB read/write filters by authenticated workspace scope",
     "R2.3": "Dual-key entity resolution: discriminate UUID/CUID vs domain/slug before database query",
@@ -27,6 +30,7 @@ PR_RULES_122: dict[str, str] = {
     "R2.5": "Outbound SSRF & timeout guard: validate URL host and set AbortSignal.timeout()",
     "R2.6": "Constant-time secret comparison: use timingSafeEqual / compare_digest",
     "R2.7": "Secure cookie & CORS hygiene: HttpOnly, Secure, SameSite, no wildcard CORS with credentials",
+    "R2.8": "No unsafe code or HTML sinks: no eval or new Function on strings; dangerouslySetInnerHTML only with sanitised HTML",
     # R3: Billing & FinOps (5 rules)
     "R3.1": "Idempotent webhook processing: deduplicate event_id with monotonic state transitions",
     "R3.2": "Monetary integer representation: store money as integer minor units (cents) + currency",
@@ -153,13 +157,74 @@ PR_RULES_122: dict[str, str] = {
     "R19.4": "Descriptive variable naming: avoid single-character variables outside trivial loops",
 }
 
+# Every rule has a status (ROADMAP E33, 2026-11-05). A stable rule fails a scan. A preview rule reports but never fails;
+# a new rule ships as preview for one minor release. A deprecated rule is retired: it keeps its ID, which is never
+# reused, and reports nothing. ``rule_ids.json`` records the IDs and titles of the last release.
+STABLE, PREVIEW, DEPRECATED = "stable", "preview", "deprecated"
+STATUSES = (STABLE, PREVIEW, DEPRECATED)
+RULE_STATUS: dict[str, str] = {         # a rule not named here is stable
+    # 30% precise in the E35 precision run (docs/benchmarks/precision.md, 2026-11-05): most hits were deliberate waits
+    # (a test checking that nothing happens in a given time) or test sources written as strings, and no small pattern
+    # change tells those from a sleep that stands in for a condition. It reports, and never blocks, until narrowed.
+    "R6.3": PREVIEW,
+}
+# Why a rule is not stable, in one or two sentences; its rule page prints it after the status.
+STATUS_REASONS: dict[str, str] = {
+    "R6.3": "In a precision run on open-source repositories most of its hits were deliberate waits (a test checking "
+            "that nothing happens in a given time) or test code written as a string, so it reports but never fails a "
+            "scan until it can tell those from a sleep that stands in for a condition.",
+}
+# A line for the Rules section of the next release notes about a rule, for a change the ID file cannot show: findings
+# that moved to another ID before the first release. Emptied when the release that carries them is out.
+RULE_NOTES: dict[str, str] = {
+    "R2.8": "New ID for the eval, new Function and dangerouslySetInnerHTML findings, which builds before 0.6.0 reported "
+            "as R2.5 (the SSRF and timeout guard, which brevio-core scan does not check); name R2.8 in an ignore "
+            "comment or brevio-core.toml for them.",
+    "R6.3": "Now preview: it reports a sleep in a test but never fails a scan (see its rule page).",
+}
+
+
+def rule_status(rule_id: str) -> str:
+    """The status of a rule of ``PR_RULES_122``: ``stable``, ``preview`` or ``deprecated``."""
+    return RULE_STATUS.get(rule_id, STABLE)
+
 
 # Pre-compiled regex patterns for common rule violations on added lines
-_SECRET_RX = re.compile(
-    r"""(?i)(?:api[_-]?key|secret|password|bearer|auth[_-]?token)\s*[:=]\s*['"][A-Za-z0-9_\-]{16,}['"]"""
-)
+# R13.1 flags a known credential format anywhere on a code line, or a random-looking literal bound to a secret-named
+# identifier. Any long quoted string after a key-like name was 0% precise on open-source code: public search keys and
+# storage-entry names (E35 precision run, docs/benchmarks/precision.md, 2026-11-05).
+_CREDENTIAL_RX = re.compile(
+    r"(?<![A-Za-z0-9])(?:"
+    r"(?:AKIA|ASIA)[0-9A-Z]{16}(?![0-9A-Za-z])"                     # AWS access key ID
+    r"|gh[pousr]_[A-Za-z0-9]{36}(?![A-Za-z0-9])"                     # GitHub token
+    r"|github_pat_[A-Za-z0-9]{22}_[A-Za-z0-9]{59}(?![A-Za-z0-9])"    # GitHub fine-grained token
+    r"|xox[abposr]-[A-Za-z0-9-]{10,}"                                # Slack token
+    r"|(?:sk|rk)_live_[A-Za-z0-9]{24,}"                              # Stripe secret or restricted live key
+    r"|AIza[0-9A-Za-z_\-]{35}(?![0-9A-Za-z_\-])"                     # Google API key
+    r"|-{5}BEGIN (?:[A-Z0-9]+ )*PRIVATE KEY(?: BLOCK)?-{5}"          # a private key block
+    r")")
+_SECRET_NAME = r"[\w$.-]*?(?:secret|token|passw(?:or)?d|pwd|api_?key|private_?key|access_?key|credential)[\w$-]*"
+# ``name = '…'``, ``name: '…'`` and TypeScript's ``name: string = '…'``.
+_SECRET_ASSIGN_RX = re.compile(
+    r"(?<![\w$.-])(?P<name>" + _SECRET_NAME + r")['\"]?\s*(?::\s*[\w$.<>\[\]| ]{1,40}?\s*)?(?:=|:)\s*"
+    r"(?P<q>['\"`])(?P<val>[^'\"`\s]{16,512})(?P=q)", re.I)
+_JWT_RX = re.compile(r"^eyJ[A-Za-z0-9_-]{10,}\.eyJ[A-Za-z0-9_-]{5,}\.[A-Za-z0-9_-]{10,}$")
+# A value with one of these is a placeholder, not a key. Known-public kinds: a name that says public or publishable
+# (NEXT_PUBLIC_*, publishableKey), Stripe's publishable pk_ keys, and Algolia search keys, which ship to the browser.
+_PLACEHOLDER_RX = re.compile(r"x{4,}|\*{3,}|\.{3}|your[_-]|example|change_?me|placeholder|dummy|sample|fake|redacted"
+                             r"|test|mock|<[^>]*>|\$\{|\{\{", re.I)
+_PUBLIC_NAME_RX = re.compile(r"public|publishable", re.I)
+_PUBLIC_CONTEXT_RX = re.compile(r"algolia|docsearch", re.I)
+_SECRET_CONTEXT = 5     # lines before a hit read for a public key kind (an Algolia block names its key `apiKey`)
 _DANGEROUS_HTML_RX = re.compile(r"dangerouslySetInnerHTML\s*=\s*\{\s*\{\s*__html\b")
-_EVAL_RX = re.compile(r"\b(?:eval|Function)\s*\(")
+# Sanitizers at the dangerouslySetInnerHTML sink: escapeHtml, DOMPurify.sanitize, sanitizeHtml, etc.
+_SANITIZED_HTML_RX = re.compile(r"__html\s*:\s*(?:(?:DOMPurify|dompurify|sanitizeHtml|xss)\.sanitize|escapeHtml|sanitizeHtml|DOMPurify|sanitize|escape)\s*\(", re.I)
+# Not after ``$``: Playwright's ``page.$eval`` selector API is not JavaScript eval (E35 precision run, 2026-11-05).
+_EVAL_RX = re.compile(r"(?<![\w$])(?:eval|Function)\s*\(")
+# In test files, eval with a static quoted string literal (no interpolation) is a test probe (E35 precision run).
+_STATIC_EVAL_RX = re.compile(r"\beval\s*\(\s*(?:\"(?:[^\"\\$]|\\.)*\"|'(?:[^'\\$]|\\.)*')\s*\)")
+# Test fixture assets (e.g. tests/assets/): vendored builds kept for browser test suites run no user sinks.
+_TEST_ASSET_RX = re.compile(r"(?:^|/)(?:tests?|spec)/assets/", re.I)
 _NO_ALT_IMG_RX = re.compile(r"<img\b(?!.*?alt=)[^>]*>", re.I)
 _CLICK_ON_DIV_RX = re.compile(r"<div\b[^>]*onClick\s*=(?!.*?role=)[^>]*>", re.I)
 _UNBOUNDED_QUERY_RX = re.compile(r"\.(?:findMany|select)\s*\(\s*\{(?![^}]*take\s*:)(?![^}]*limit\s*:)", re.I)
@@ -168,40 +233,95 @@ _TS_IGNORE_RX = re.compile(r"@ts-ignore\b")
 _EMPTY_CATCH_RX = re.compile(r"\bcatch\s*(?:\([^)]*\))?\s*\{\s*\}")
 _BARE_EXCEPT_RX = re.compile(r"^\s*\+?\s*except\s*:")
 _WAIT_FOR_TIMEOUT_RX = re.compile(r"\bwaitForTimeout\s*\(\s*\d+")
+# A line that is only a comment runs nothing: `<img>` or `as any` in prose is not code (E35 precision run, 2026-11-05).
+_COMMENT_LINE_RX = re.compile(r"^\s*(?://|/\*|\*)")
+# A div whose click handler only stops propagation is a wrapper, not a control; `role="button"` would be wrong (E35).
+_STOP_ONLY_RX = re.compile(r"onClick\s*=\s*\{\s*\(?\s*(\w+)\s*\)?\s*=>\s*\1\.stopPropagation\(\)\s*\}")
+# A TypeScript declaration file holds types only, no code that runs, so no code rule can be right there: its R2.8 hits
+# were prose in doc comments (E35 precision run, 2026-11-06).
+_DECLARATION_RX = re.compile(r"\.d\.[cm]?ts$", re.I)
 
 
-def _check_line_patterns(rel_path: str, lno: int, line: str, findings: list[str]) -> None:
-    """Helper to evaluate single-line AST and regex rules."""
+def _entropy(s: str) -> float:
+    """Bits per character of ``s``."""
+    n = len(s)
+    return -sum(c / n * math.log2(c / n) for c in Counter(s).values()) if n else 0.0
+
+
+def _random_looking(value: str) -> bool:
+    """A literal that reads as a generated key: one run of 12 or more characters between separators that mixes
+    letters and digits at 3 bits per character or more. Words, slugs, paths, URLs and placeholders do not."""
+    if _PLACEHOLDER_RX.search(value) or "://" in value or value.startswith(("/", "./", "#", "data:", "sha", "pk_")):
+        return False
+    return any(len(seg) >= 12 and re.search(r"\d", seg) and re.search(r"[A-Za-z]", seg) and _entropy(seg) >= 3.0
+               for seg in re.split(r"[-_.:]", value))
+
+
+def _hardcoded_secret(line: str, before: str) -> bool:
+    """R13.1 on one code line; ``before`` is the text of the few lines above it, read for a public key kind."""
+    if _CREDENTIAL_RX.search(line):
+        return True
+    for m in _SECRET_ASSIGN_RX.finditer(line):
+        name, val = m["name"], m["val"]
+        if _PUBLIC_NAME_RX.search(name):
+            continue
+        if _JWT_RX.match(val):
+            return True
+        if _random_looking(val) and not _PUBLIC_CONTEXT_RX.search(name + "\n" + line + "\n" + before):
+            return True
+    return False
+
+
+def _unsafe_eval(rel_path: str, line: str, in_test: bool) -> bool:
+    """True when ``line`` runs eval or Function outside test fixture assets and static literal eval probes."""
+    if not _EVAL_RX.search(line) or _TEST_ASSET_RX.search(rel_path):
+        return False
+    if in_test and _STATIC_EVAL_RX.search(line) and not _EVAL_RX.search(_STATIC_EVAL_RX.sub("", line)):
+        return False
+    return True
+
+
+def _check_ui_patterns(rel_path: str, lno: int, line: str, findings: list[str]) -> None:
+    """The rules for a code line of a UI component (``.tsx``, ``.jsx``) outside the tests."""
+    if _DANGEROUS_HTML_RX.search(line) and not _SANITIZED_HTML_RX.search(line):
+        findings.append(f"{rel_path}:{lno}: [R2.8] Unsanitized `dangerouslySetInnerHTML` in UI component")
+    if _NO_ALT_IMG_RX.search(line):
+        findings.append(f"{rel_path}:{lno}: [R18.1] Missing `alt` attribute on `<img>` element")
+    if _CLICK_ON_DIV_RX.search(line) and not _STOP_ONLY_RX.search(line):
+        findings.append(f"{rel_path}:{lno}: [R18.5] `onClick` handler on non-interactive `<div>` without `role`")
+
+
+def _check_line_patterns(rel_path: str, lno: int, line: str, findings: list[str], before: str = "") -> None:
+    """Helper to evaluate single-line AST and regex rules; ``before`` is the text of the few lines above ``line``."""
     ext = os.path.splitext(rel_path)[1].lower()
-    is_script = ext in (".ts", ".tsx", ".js", ".jsx")
-    is_ui = ext in (".tsx", ".jsx")
+    in_test = "test" in rel_path.lower()
+    code = not _COMMENT_LINE_RX.match(line)     # the @ts-ignore rule still reads comments: the directive is one
+    is_script = ext in (".ts", ".tsx", ".js", ".jsx") and code
+    # A test file's credentials are fixtures and its components are never shown to a user (E35 precision run, 2026-11-05).
+    is_ui = ext in (".tsx", ".jsx") and code and not in_test
 
-    if _SECRET_RX.search(line) and not ("example" in line.lower() or "test" in line.lower()):
+    if not in_test and _hardcoded_secret(line, before):
         findings.append(f"{rel_path}:{lno}: [R13.1] Hardcoded secret pattern detected in added code")
 
     if ext == ".py":
         if _BARE_EXCEPT_RX.search(line):
             findings.append(f"{rel_path}:{lno}: [R5.4] Bare `except:` detected; specify explicit exception tuple")
 
+    if ext in (".ts", ".tsx", ".js", ".jsx") and _TS_IGNORE_RX.search(line):
+        findings.append(f"{rel_path}:{lno}: [R9.2] `@ts-ignore` used; use `@ts-expect-error` with explanatory reason")
+
     if is_script:
-        if _AS_ANY_RX.search(line) and "test" not in rel_path.lower():
+        if _AS_ANY_RX.search(line) and not in_test:
             findings.append(f"{rel_path}:{lno}: [R9.1] Untyped escape hatch `as any` or `z.any()` in production source")
-        if _TS_IGNORE_RX.search(line):
-            findings.append(f"{rel_path}:{lno}: [R9.2] `@ts-ignore` used; use `@ts-expect-error` with explanatory reason")
         if _EMPTY_CATCH_RX.search(line):
             findings.append(f"{rel_path}:{lno}: [R5.4] Empty catch block detected; handle or log the error")
-        if _EVAL_RX.search(line):
-            findings.append(f"{rel_path}:{lno}: [R2.5] Unsafe `eval` or dynamic `Function` constructor detected")
+        if _unsafe_eval(rel_path, line, in_test):
+            findings.append(f"{rel_path}:{lno}: [R2.8] Unsafe `eval` or dynamic `Function` constructor detected")
 
     if is_ui:
-        if _DANGEROUS_HTML_RX.search(line):
-            findings.append(f"{rel_path}:{lno}: [R2.5] Unsanitized `dangerouslySetInnerHTML` in UI component")
-        if _NO_ALT_IMG_RX.search(line):
-            findings.append(f"{rel_path}:{lno}: [R18.1] Missing `alt` attribute on `<img>` element")
-        if _CLICK_ON_DIV_RX.search(line):
-            findings.append(f"{rel_path}:{lno}: [R18.5] `onClick` handler on non-interactive `<div>` without `role`")
+        _check_ui_patterns(rel_path, lno, line, findings)
 
-    if "test" in rel_path.lower() and _WAIT_FOR_TIMEOUT_RX.search(line):
+    if in_test and _WAIT_FOR_TIMEOUT_RX.search(line):
         findings.append(f"{rel_path}:{lno}: [R6.3] `waitForTimeout` sleep in test; use deterministic assertions")
 
 
@@ -211,14 +331,23 @@ def scan_added_lines_for_rules(
     """Scan added lines across changed files against portable zero-token code rules."""
     findings: list[str] = []
     for rel_path, lines in added_lines_by_file.items():
-        for lno, line in enumerate(lines, 1):
-            _check_line_patterns(rel_path, lno, line, findings)
+        findings += scan_lines(rel_path, list(enumerate(lines, 1)))
     return findings
 
 
+def declaration(rel_path: str) -> bool:
+    """``rel_path`` names a TypeScript declaration file: types only, no code that runs."""
+    return bool(_DECLARATION_RX.search(rel_path))
+
+
 def scan_lines(rel_path: str, numbered: list[tuple[int, str]]) -> list[str]:
-    """Scan ``(line_no, text)`` pairs of one file, keeping the real line numbers (a diff's added lines)."""
+    """Scan ``(line_no, text)`` pairs of one file, keeping the real line numbers (a diff's added lines).
+
+    A TypeScript declaration file (``.d.ts``, ``.d.mts``, ``.d.cts``) gives no finding, so every scan mode skips it."""
     findings: list[str] = []
-    for lno, line in numbered:
-        _check_line_patterns(rel_path, lno, line, findings)
+    if declaration(rel_path):
+        return findings
+    for i, (lno, line) in enumerate(numbered):
+        before = "\n".join(t for n, t in numbered[max(0, i - _SECRET_CONTEXT):i] if n >= lno - _SECRET_CONTEXT)
+        _check_line_patterns(rel_path, lno, line, findings, before)
     return findings

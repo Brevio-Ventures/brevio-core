@@ -1,5 +1,8 @@
 blank_issues_enabled: false
 contact_links:
+  - name: Ask a question or discuss an idea
+    url: https://github.com/Brevio-Ventures/brevio-core/discussions
+    about: Questions, ideas and rule proposals in their early stage go to Discussions. Issues are for bugs.
   - name: Report a security problem
     url: https://github.com/Brevio-Ventures/brevio-core/security/advisories/new
     about: Please report vulnerabilities privately, not as a public issue.

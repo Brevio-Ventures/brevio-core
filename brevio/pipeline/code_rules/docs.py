@@ -5,19 +5,26 @@ come from ``details.DETAILS``. How it is checked is worked out from the code: ``
 scanner, and ``dev_rules.slice_micro_rules`` for the cards a slice gets. Standard library only, so the
 exported package carries it.
 
+Each page is also a search landing page (ADOPTION.md E38, 2026-11-05): front matter with a search-shaped title
+("<problem> in <language>: why and how to fix") and the short answer as its description, the short answer first on
+the page, links to related rules of the same group, and a schema.org ``TechArticle`` in JSON-LD. The docs site's
+Jekyll config makes the sitemap. ``render`` is the page without the front matter and the JSON-LD, which is what the
+MCP ``explain`` tool returns.
+
     python -m brevio.pipeline.code_rules.docs --out docs/rules     write the pages
     python -m brevio.pipeline.code_rules.docs --check docs/rules   list a missing, stale or orphan page
 """
 from __future__ import annotations
 
 import argparse
+import json
 import os
 import re
 import sys
 
 from brevio.pipeline import dev_rules
-from brevio.pipeline.code_rules import PR_RULES_122
-from brevio.pipeline.code_rules.details import DETAILS, SCANS
+from brevio.pipeline.code_rules import PR_RULES_122, STATUS_REASONS, rule_status
+from brevio.pipeline.code_rules.details import DETAILS, SCANS, scanned_by
 
 GROUPS = {
     1: "UI and mobile performance", 2: "Security and tenancy", 3: "Billing and money", 4: "Database and migrations",
@@ -34,6 +41,10 @@ _SAMPLE_PATHS = ("a.tsx", "apps/api/x.ts", "src/billing/x.ts", "schema.prisma", 
 _BRACKET = re.compile(r"\[([^\]]*R\d+\.\d+[^\]]*)\]")
 _ID = re.compile(r"R(\d+)\.(\d+)(?:-R(\d+)\.(\d+))?")
 README = "README.md"
+# The language a page's examples are in, for its search title; a plain-text example names none.
+LANGUAGES = {"ts": "TypeScript", "tsx": "React and TypeScript", "py": "Python", "css": "CSS", "json": "package.json",
+             "sql": "SQL", "html": "HTML"}      # every JSON example is a package.json
+RELATED = 4         # related rules linked from a page: the next ones of its group, in catalogue order
 
 
 def rule_ids() -> list[str]:
@@ -67,15 +78,39 @@ def _title_and_text(rule_id: str) -> tuple[str, str]:
     return line.partition(": ")[0], line
 
 
+def search_title(rule_id: str) -> str:
+    """The title a search for the mistake would match: "<problem> in <language>: why and how to fix"."""
+    title = _title_and_text(rule_id)[0]
+    problem = title[3:] if title.startswith("No ") else title
+    lang = LANGUAGES.get(DETAILS[rule_id].lang)
+    return f"{problem[:1].upper()}{problem[1:]}{f' in {lang}' if lang else ''}: why and how to fix"
+
+
+def answer(rule_id: str) -> str:
+    """The short answer, first on the page: what to do, then why."""
+    text = _title_and_text(rule_id)[1]
+    rule = text.partition(": ")[2] or text
+    return f"{rule[:1].upper()}{rule[1:]}. {DETAILS[rule_id].why}"
+
+
+def related(rule_id: str) -> list[str]:
+    """Up to ``RELATED`` other rules of the same group: the ones after this rule, wrapping to the group's start."""
+    group = [r for r in rule_ids() if _key(r)[0] == _key(rule_id)[0]]
+    at = group.index(rule_id)
+    return (group[at + 1:] + group[:at])[:RELATED]
+
+
 def checked_by(rule_id: str, cards: frozenset[str]) -> list[str]:
     """How the code checks a rule, one line each; one line saying so when nothing does."""
     out = []
     if rule_id in SCANS:
         engine = SCANS[rule_id][0]
-        out.append("A pre-flight scan of added lines (`dev_rules.scan_added_lines`)." if engine == "dev"
-                   else "A diff scan of added lines (`code_rules.scan_added_lines_for_rules`).")
+        out.append("The harness's pre-flight scan of added lines (`dev_rules.scan_added_lines`); `brevio-core scan` "
+                   "does not run it." if engine == "dev"
+                   else "`brevio-core scan`: a scan of added lines (`code_rules.scan_added_lines_for_rules`).")
     elif rule_id in GIT_SCANS:
-        out.append("A pre-flight scan against `main`, in a git checkout (`dev_rules.scan_added_lines`).")
+        out.append("The harness's pre-flight scan against `main`, in a git checkout (`dev_rules.scan_added_lines`); "
+                   "`brevio-core scan` does not run it.")
     if rule_id in cards:
         out.append("A one-line card in the prompt of a slice that touches matching files "
                    "(`dev_rules.slice_micro_rules`).")
@@ -86,8 +121,11 @@ def checked_by(rule_id: str, cards: frozenset[str]) -> list[str]:
 def silence_text(rule_id: str) -> str:
     detail = DETAILS[rule_id]
     scanned = rule_id in SCANS or rule_id in GIT_SCANS
-    lines = ["There is no ignore comment. That is on purpose: a comment that silences a rule is the easiest way "
-             "for an automated author to pass its own gate. Fix the code instead."]
+    # A person can silence one finding with a reason; an agent cannot (ROADMAP E21, plan review, 2026-11-05).
+    lines = [f"A person can silence one finding with `brevio-core: ignore {rule_id} -- reason` on the line or the line "
+             "above. Without the reason it does not count. An agent cannot silence it: the agent hook and the MCP "
+             "tools never honour the comment, and a pull request that adds one is reported until a reviewer allows "
+             "it. Fixing the code is still the better answer."]
     if detail.exempt:
         lines.append(f"What the scanner already leaves alone: {detail.exempt}")
     if scanned:
@@ -108,39 +146,66 @@ def render(rule_id: str, cards: frozenset[str] | None = None) -> str:
     d = DETAILS[rule_id]
     group = GROUPS[_key(rule_id)[0]]
     checks = "\n".join(f"- {c}" for c in checked_by(rule_id, cards))
+    links = "\n".join([f"- [{r}]({filename(r)}) {_title_and_text(r)[0]}" for r in related(rule_id)]
+                      + [f"- [Every rule]({README})"])
+    reason = f" {STATUS_REASONS[rule_id]}" if rule_id in STATUS_REASONS else ""
     return (f"# {rule_id}: {title}\n\n"
-            f"Group: {group}. Generated from the rule definitions; do not edit by hand.\n\n"
+            f"**Short answer:** {answer(rule_id)}\n\n"
+            f"Group: {group}. Status: {rule_status(rule_id)}.{reason} Generated from the rule definitions; do not edit "
+            "by hand.\n\n"
             f"## What it catches\n\n{text}.\n\n"
             f"## Why\n\n{d.why}\n\n"
             f"## A bad example\n\n{_fence(d.lang, d.bad)}\n\n"
             f"## A good example\n\n{_fence(d.lang, d.good)}\n\n"
             f"## How it is checked\n\n{checks}\n\n"
-            f"## How to silence it\n\n{silence_text(rule_id)}\n")
+            f"## How to silence it\n\n{silence_text(rule_id)}\n\n"
+            f"## Related rules\n\n{links}\n")
+
+
+def json_ld(rule_id: str) -> str:
+    """The page as a schema.org ``TechArticle``, in a script block that no text of the rule can close early."""
+    group = GROUPS[_key(rule_id)[0]]
+    doc = {"@context": "https://schema.org", "@type": "TechArticle", "headline": search_title(rule_id),
+           "description": answer(rule_id), "about": group, "inLanguage": "en",
+           "keywords": [rule_id, _title_and_text(rule_id)[0], group],
+           "isPartOf": {"@type": "WebSite", "name": "brevio-core rules"}}
+    body = json.dumps(doc, ensure_ascii=False).replace("</", "<\\/")
+    return f'<script type="application/ld+json">\n{body}\n</script>\n'
+
+
+def page(rule_id: str, cards: frozenset[str] | None = None) -> str:
+    """The published page: front matter with the search title and the short answer, the page, then its JSON-LD."""
+    front = f"---\ntitle: {json.dumps(search_title(rule_id))}\ndescription: {json.dumps(answer(rule_id))}\n---\n"
+    return f"{front}{render(rule_id, cards)}\n{json_ld(rule_id)}"
 
 
 def render_index(cards: frozenset[str] | None = None) -> str:
-    """The list of every rule page, grouped, saying which rules a scanner checks."""
+    """The list of every rule page, grouped, saying which rules ``brevio-core scan`` checks and which only the harness's
+    pre-flight checks (they were counted together until 2026-11-05, which overstated what the package scans)."""
     cards = card_ids() if cards is None else cards
-    scanned = sum(1 for r in PR_RULES_122 if r in SCANS or r in GIT_SCANS)
+    public = set(scanned_by("code"))
+    preflight = {r for r in PR_RULES_122 if (r in SCANS or r in GIT_SCANS) and r not in public}
     out = ["# Rules\n",
            f"One page per rule: what it catches, why, a bad and a good example, how it is checked and how to "
-           f"silence it. There are {len(PR_RULES_122)} rules. A scanner checks {scanned} of them; "
-           f"{len(cards - set(SCANS) - GIT_SCANS)} more are slice cards; the rest are standing rules. "
+           f"silence it. There are {len(PR_RULES_122)} rules. `brevio-core scan` checks {len(public)} of them. "
+           f"The harness's pre-flight checks {len(preflight)} more, which `brevio-core scan` does not run; "
+           f"{len(cards - public - preflight)} more are slice cards; the rest are standing rules. "
            "Generated from the rule definitions; do not edit by hand.\n"]
     major = 0
     for rid in rule_ids():
         if _key(rid)[0] != major:
             major = _key(rid)[0]
             out.append(f"\n## R{major}: {GROUPS[major]}\n")
-        mark = " (scanned)" if rid in SCANS or rid in GIT_SCANS else ""
-        out.append(f"- [{rid}]({filename(rid)}) {_title_and_text(rid)[0]}{mark}")
+        mark = " (brevio-core scan)" if rid in public else " (harness pre-flight)" if rid in preflight else ""
+        status = "" if rule_status(rid) == "stable" else f" ({rule_status(rid)})"
+        out.append(f"- [{rid}]({filename(rid)}) {_title_and_text(rid)[0]}{mark}{status}")
     return "\n".join(out) + "\n"
 
 
 def all_pages() -> dict[str, str]:
     """File name -> text for the index and every rule page."""
     cards = card_ids()
-    pages = {filename(rid): render(rid, cards) for rid in rule_ids()}
+    pages = {filename(rid): page(rid, cards) for rid in rule_ids()}
     pages[README] = render_index(cards)
     return pages
 

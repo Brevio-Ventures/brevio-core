@@ -4,4 +4,5 @@
 
 - [ ] Every commit is signed off (`git commit -s`).
 - [ ] The tests pass: `python -m unittest discover -s tests/pipeline/core_export -t .`
-- [ ] A new or changed rule has a test and an up-to-date page.
+- [ ] A new or changed rule has a test and an up-to-date page, and meets the rubric in CONTRIBUTING.md.
+- [ ] It changes only files listed in `MANIFEST.json` (see "How this repo works" in CONTRIBUTING.md).

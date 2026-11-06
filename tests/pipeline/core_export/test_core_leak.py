@@ -37,10 +37,20 @@ class TestChecks(unittest.TestCase):
         lookalikes = [f"{HTTPS}notbrevio.pro/", f"{HTTPS}brevio.pro.evil.example/"]
         self.assertEqual(leak_scan.bad_urls(" ".join(lookalikes)), lookalikes)
 
-    def test_only_placeholder_and_the_security_address_pass_as_email(self):
-        self.assertEqual(leak_scan.bad_emails("a@example.com security@brevio.pro"), [])
+    def test_only_placeholder_and_the_security_and_legal_addresses_pass_as_email(self):
+        self.assertEqual(leak_scan.bad_emails("a@example.com security@brevio.pro legal@brevio.pro"), [])
         stray = "jane" + "@corp.io"
         self.assertEqual(leak_scan.bad_emails(stray), [stray])
+        self.assertEqual(leak_scan.bad_emails(f"Write to {stray}."), [stray])
+
+    def test_a_pinned_version_is_not_an_email(self):
+        self.assertEqual(leak_scan.bad_emails("uvx brevio-core@0.4.0 scan, uses: example-org/brevio-core@v0.4.0"), [])
+
+    def test_the_organisation_pages_site_passes_only_for_that_organisation(self):
+        pages = f"{HTTPS}example-org.github.io/brevio-core/rules"
+        self.assertEqual(leak_scan.bad_urls(pages, "Example-Org"), [])
+        self.assertEqual(leak_scan.bad_urls(pages, "other-org"), [pages])
+        self.assertEqual(leak_scan.bad_urls(pages), [pages])
 
     def test_a_module_or_path_that_is_not_in_the_tree_is_flagged(self):
         with tempfile.TemporaryDirectory() as d:
@@ -53,6 +63,18 @@ class TestChecks(unittest.TestCase):
             private = ["brevio" + ".pipeline.gates", "tools" + "/x.py"]
             text = "brevio.pipeline.dev_rules.X, brevio/pipeline/dev_rules.py, brevio.pro, " + ", ".join(private)
             self.assertEqual(leak_scan.bad_internal_paths(text, d), private)
+
+    def test_the_source_map_may_name_harness_paths_but_not_a_stray_url(self):
+        with tempfile.TemporaryDirectory() as d:
+            with open(os.path.join(d, leak_scan.SOURCE_MAP), "w", encoding="utf-8") as fh:
+                fh.write('{"files": {"README.md": "' + "tools" + '/release/README.md"}}\n')
+            self.assertEqual(leak_scan.scan_tree(d), [])
+            with open(os.path.join(d, leak_scan.SOURCE_MAP), "a", encoding="utf-8") as fh:
+                fh.write(f"{HTTPS}example.org/x\n")
+            self.assertEqual(leak_scan.scan_tree(d), [f"{leak_scan.SOURCE_MAP}: url: {HTTPS}example.org/x"])
+            with open(os.path.join(d, "NOTES.md"), "w", encoding="utf-8") as fh:
+                fh.write("tools" + "/release/README.md\n")
+            self.assertIn("NOTES.md: internal path: " + "tools" + "/release/README.md", leak_scan.scan_tree(d))
 
 
 if __name__ == "__main__":

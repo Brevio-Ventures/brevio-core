@@ -1,0 +1,34 @@
+name: Bug
+description: A crash, a wrong exit code, or a command that does not do what its help says
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: >-
+        A finding on code that is correct is a "False positive"; questions go to Discussions. Do not paste secrets,
+        tokens or private code: cut the example down to a line or two you may share.
+  - type: textarea
+    id: what-happened
+    attributes:
+      label: What happened
+      description: The command you ran and what it printed.
+      render: text
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: What you expected
+    validations:
+      required: true
+  - type: input
+    id: version
+    attributes:
+      label: Version
+      description: The output of `pip show brevio-core`, or the Action tag you use.
+    validations:
+      required: true
+  - type: input
+    id: environment
+    attributes:
+      label: Python version and operating system

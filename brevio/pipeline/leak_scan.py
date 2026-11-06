@@ -14,23 +14,31 @@ import re
 ALLOWED_URLS = (
     "brevio.pro", "docs.github.com", "docs.python.org", "packaging.python.org",
     "www.apache.org/licenses", "developercertificate.org", "www.contributor-covenant.org", "spdx.org/licenses",
+    "static.modelcontextprotocol.io/schemas", "glama.ai/mcp/schemas",    # the $schema of the two listing files (2026-11-05)
+    "img.shields.io/badge",     # the static "checked by" badge ``init`` prints; a fixed image, no data (ROADMAP E22, 2026-11-05)
+    "schema.org",               # the JSON-LD vocabulary of the rule pages, a name and not a link (ADOPTION.md E38, 2026-11-05)
 )
 PLACEHOLDER_EMAIL_DOMAINS = ("example.com", "example.org", "example.net")
-ALLOWED_EMAILS = ("security@brevio.pro",)
+ALLOWED_EMAILS = ("security@brevio.pro", "legal@brevio.pro")    # legal: trademark and privacy (ROADMAP E39, 2026-11-05)
 # Folders of the harness that the public tree must not point into unless the file really is there.
 PRIVATE_ROOTS = ("brevio", "tools", "scripts", "bin", "state", "projects")
+# The release's map of each file to its harness source names harness paths on purpose, so it skips the path check
+# only; its URLs and emails are still checked (ROADMAP E29a, 2026-11-05).
+SOURCE_MAP = "MANIFEST.json"
 _PACKAGE_STUB = "Part of the portable brevio rule engines."
 
 _SOURCE = re.compile(r"^Source\s*=\s*\"https:(?://)github\.com/([^/\"]+)/", re.M)
 _URL = re.compile(r"https?://[^\s)>\]\"'`<,;]+", re.I)
-_EMAIL = re.compile(r"(?<![\w.%+-])[\w.%+-]+@([A-Za-z0-9-]+(?:\.[A-Za-z0-9-]+)+)", re.I)
+# The last label of a mail domain holds a letter, so a pinned version (``brevio-core@0.4.0``, ``x@v1.2.3``) is no email.
+_EMAIL = re.compile(r"(?<![\w.%+-])[\w.%+-]+@([A-Za-z0-9-]+(?:\.[A-Za-z0-9-]+)*\.[A-Za-z0-9-]*[A-Za-z][A-Za-z0-9-]*)", re.I)
 _DOTTED = re.compile(r"(?<![\w.])brevio((?:\.[A-Za-z_]\w*)+)")
 _SLASHED = re.compile(r"(?<![\w/.-])((?:" + "|".join(PRIVATE_ROOTS) + r")/[\w./-]*\w)")
 
 
 def allowed_urls(org: str | None = None) -> tuple[str, ...]:
-    """The allow-list, plus ``github.com/<org>`` (lower case, as URLs are compared) when an organisation is named."""
-    return ALLOWED_URLS + ((f"github.com/{org.lower()}",) if org else ())
+    """The allow-list, plus ``github.com/<org>`` and the organisation's Pages site (lower case, as URLs are compared)
+    when an organisation is named. The rule pages live on that site, and the Action links each finding to its page."""
+    return ALLOWED_URLS + ((f"github.com/{org.lower()}", f"{org.lower()}.github.io") if org else ())
 
 
 def tree_org(root: str) -> str | None:
@@ -127,5 +135,6 @@ def scan_tree(root: str, org: str | None = None) -> list[str]:
             continue
         problems += [f"{rel}: url: {u}" for u in bad_urls(text, org)]
         problems += [f"{rel}: email: {e}" for e in bad_emails(text)]
-        problems += [f"{rel}: internal path: {p}" for p in bad_internal_paths(text, root)]
+        if rel != SOURCE_MAP:
+            problems += [f"{rel}: internal path: {p}" for p in bad_internal_paths(text, root)]
     return sorted(set(problems))
