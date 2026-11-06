@@ -65,7 +65,7 @@ PACKS: dict[str, dict[str, Any]] = {
                 "title": "Async route handlers must not invoke blocking sleep or sync I/O",
                 "category": "robustness",
                 "file_patterns": ["**/*.py"],
-                "patterns": ["re:async\\s+def[\\s\\S]*?time\\.sleep\\("],
+                "patterns": ["re:requests\\.(get|post|put|delete)\\(|time\\.sleep\\("],
             },
             {
                 "id": "pack-fastapi-lifespan",

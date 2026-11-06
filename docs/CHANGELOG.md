@@ -1,5 +1,20 @@
 # Changelog
 
+## 0.7.0 (unreleased)
+
+### Rules and fixers
+
+- `brevio-core scan` now checks 12 scanned rules of the 123 in the catalogue (111 documented): R5.5 flags `subprocess`
+  calls with `shell=True` and `os.system` calls with interpolated strings in Python; R10.1 flags single-line `requests`
+  calls without `timeout=` in Python; R16.2 flags `"*"` and `"latest"` dependency ranges in `package.json`; and R18.2
+  flags single-line `target="_blank"` anchor tags without `rel="noopener noreferrer"`.
+- R2.8 also flags raw SQL string interpolation in `.execute(f"SELECT ...")` and `.$queryRawUnsafe` template literals,
+  as well as hidden directional and Unicode tag control characters.
+- R13.1 also flags secret-named environment variables exposed to client bundles (`NEXT_PUBLIC_`, `VITE_`, `REACT_APP_`).
+- `brevio-core scan --fix` and the MCP `fix` tool now rewrite `target="_blank"` anchor tags that have no `rel=`
+  attribute to add `rel="noopener noreferrer"` (R18.2).
+- Every rule page in `docs/rules` now links to the interactive rule playground on `brevio.pro`.
+
 ## 0.6.0 (unreleased)
 
 ### Adopt it on a repository that has findings

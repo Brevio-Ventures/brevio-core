@@ -93,20 +93,20 @@ def _extract_diff_hunks(diff_text: str) -> list[dict[str, Any]]:
     return hunks
 
 
-def _derive_guard_patterns(hunk: dict[str, Any]) -> tuple[list[str], str]:
+def _synthesize_forbidden_patterns(removed: list[str]) -> list[str]:
     patterns: list[str] = []
-    removed = hunk.get("removed", [])
-    title_candidate = ""
-
     for line in removed[:5]:
         pat = line.replace("\\", "\\\\")
         pat = re.sub(r"\s+", " ", pat).strip()
         if len(pat) >= 8 and pat not in patterns:
             patterns.append(pat)
-            if not title_candidate:
-                title_candidate = pat[:40]
+    return patterns[:3]
 
-    return patterns[:3], title_candidate or "defect regression"
+
+def _derive_guard_patterns(hunk: dict[str, Any]) -> tuple[list[str], str]:
+    patterns = _synthesize_forbidden_patterns(hunk.get("removed", []))
+    title_candidate = patterns[0][:40] if patterns else ""
+    return patterns, title_candidate or "defect regression"
 
 
 def _derive_file_globs(filepath: str) -> list[str]:
@@ -130,14 +130,15 @@ def _write_agent_rule(
     os.makedirs(target_dir, exist_ok=True)
     rule_path = os.path.join(target_dir, f"{guard_id}.md")
 
+    safe_title = title.replace('"', "'").replace("\n", " ").replace("\r", " ")
     globs_yaml = json.dumps(file_globs)
     patterns_md = "\n".join(f"- `{p}`" for p in patterns)
 
     content = f"""---
-description: "Learned Guard: {title}"
+description: "Learned Guard: {safe_title}"
 paths: {globs_yaml}
 ---
-# Invariant: {title} ({category})
+# Invariant: {safe_title} ({category})
 
 This rule was automatically compiled by `brevio-core learn` from a fixed defect to prevent recurrence.
 When editing files matching `{', '.join(file_globs)}`, ensure the following anti-patterns are NEVER introduced:
@@ -163,11 +164,19 @@ def plan_guard(
     if not hunks:
         return None
 
-    hunk = hunks[0]
-    filepath = hunk["file"]
-    patterns, detected_title = _derive_guard_patterns(hunk)
-    if not patterns:
+    chosen_hunk = None
+    patterns: list[str] = []
+    detected_title = ""
+    for hunk in hunks:
+        cand_patterns, cand_title = _derive_guard_patterns(hunk)
+        if cand_patterns:
+            chosen_hunk = hunk
+            patterns = cand_patterns
+            detected_title = cand_title
+            break
+    if not chosen_hunk or not patterns:
         return None
+    filepath = chosen_hunk["file"]
 
     title = name or f"Fix {detected_title} in {os.path.basename(filepath)}"
     guard_id = f"guard-{_slugify(title)}"

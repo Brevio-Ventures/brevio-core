@@ -1,6 +1,6 @@
 # Rules
 
-One page per rule: what it catches, why, a bad and a good example, how it is checked and how to silence it. There are 123 rules. `brevio-core scan` checks 8 of them. The harness's pre-flight checks 10 more, which `brevio-core scan` does not run; 22 more are slice cards; the rest are standing rules. Generated from the rule definitions; do not edit by hand.
+One page per rule: what it catches, why, a bad and a good example, how it is checked and how to silence it. There are 123 rules. `brevio-core scan` checks 12 of them. The harness's pre-flight checks 10 more, which `brevio-core scan` does not run; 22 more are slice cards; the rest are standing rules. Generated from the rule definitions; do not edit by hand.
 
 
 ## R1: UI and mobile performance
@@ -47,7 +47,7 @@ One page per rule: what it catches, why, a bad and a good example, how it is che
 - [R5.2](R5.2.md) HTTP empty-body hygiene
 - [R5.3](R5.3.md) Bounded retry with jitter
 - [R5.4](R5.4.md) No silent exception swallowing (brevio-core scan)
-- [R5.5](R5.5.md) Process & lock safety
+- [R5.5](R5.5.md) Process & lock safety (brevio-core scan)
 
 ## R6: Testing and hermeticity
 
@@ -79,7 +79,7 @@ One page per rule: what it catches, why, a bad and a good example, how it is che
 
 ## R10: API and network robustness
 
-- [R10.1](R10.1.md) Explicit HTTP request timeouts
+- [R10.1](R10.1.md) Explicit HTTP request timeouts (brevio-core scan)
 - [R10.2](R10.2.md) Idempotency key transmission
 - [R10.3](R10.3.md) Rate-limit header handling
 - [R10.4](R10.4.md) Structured error envelope
@@ -146,7 +146,7 @@ One page per rule: what it catches, why, a bad and a good example, how it is che
 ## R16: Supply chain
 
 - [R16.1](R16.1.md) Lockfile integrity enforcement
-- [R16.2](R16.2.md) No wildcard dependency versions
+- [R16.2](R16.2.md) No wildcard dependency versions (brevio-core scan)
 - [R16.3](R16.3.md) Scoped internal packages
 - [R16.4](R16.4.md) No install script execution
 - [R16.5](R16.5.md) Production bundle minimization
@@ -168,7 +168,7 @@ One page per rule: what it catches, why, a bad and a good example, how it is che
 ## R18: Accessibility (WCAG 2.1 AA)
 
 - [R18.1](R18.1.md) Meaningful image alternative text (brevio-core scan)
-- [R18.2](R18.2.md) Form control labels
+- [R18.2](R18.2.md) Form control labels (brevio-core scan)
 - [R18.3](R18.3.md) Keyboard navigation accessibility
 - [R18.4](R18.4.md) Contrast ratio minimum
 - [R18.5](R18.5.md) No click handlers on non-interactive elements (brevio-core scan)

@@ -4,7 +4,7 @@ Every `brevio-core` command and option, generated from the argument definitions 
 
 | Command | What it does |
 | --- | --- |
-| [`brevio-core scan`](#brevio-core-scan) | scan files, folders or a diff against the 8 rules the scanner checks (of 123 documented) |
+| [`brevio-core scan`](#brevio-core-scan) | scan files, folders or a diff against the 12 rules the scanner checks (of 123 documented) |
 | [`brevio-core baseline`](#brevio-core-baseline) | record the current findings in .brevio/baseline.json, so scan reports only new ones |
 | [`brevio-core config`](#brevio-core-config) | show the brevio-core.toml settings that apply to a file or folder |
 | [`brevio-core leaks`](#brevio-core-leaks) | check a folder for stray URLs, emails and paths that should not be public |
@@ -15,11 +15,13 @@ Every `brevio-core` command and option, generated from the argument definitions 
 | [`brevio-core mcp`](#brevio-core-mcp) | serve scan, explain, list_rules and learn to an agent over MCP on stdin and stdout |
 | [`brevio-core init`](#brevio-core-init) | set this repository up in one step: the Action, agent rules and a baseline (init --undo takes it back) |
 | [`brevio-core aeo`](#brevio-core-aeo) | score a folder of built HTML pages, with its robots.txt and llms.txt, against the AEO rubric |
+| [`brevio-core check`](#brevio-core-check) | run the pre-PR flight check (rules, test custody, test imports, conflict markers and complexity) |
+| [`brevio-core brief`](#brevio-core-brief) | print the zero-token rule & trap briefing for the files you are about to edit |
 | [`brevio-core up`](#brevio-core-up) | show what a team sync would take from this repository, and the waitlist link (uploads nothing) |
 
 ## `brevio-core scan`
 
-Scan files, folders or a diff against the 8 rules the scanner checks (of 123 documented).
+Scan files, folders or a diff against the 12 rules the scanner checks (of 123 documented).
 
 ```
 brevio-core scan [options] [paths ...]
@@ -32,6 +34,7 @@ brevio-core scan [options] [paths ...]
 | `--diff [BASE]` |  | scan only the lines added against BASE (default origin/main) |
 | `--sarif FILE` |  | also write the findings to FILE as SARIF |
 | `--forbid-ignores` |  | never honour an ignore comment (the agent hook runs with this, so an agent cannot silence a rule) |
+| `--surface` |  | also run the 9 surface-scoped rules (UI blur, SSR reveal, GTM deferral, webhook HMAC, integer cents, self-mocking tests, weak assertions, contract purity, package imports) |
 | `--fix` |  | rewrite in place what a rule has one correct fix for, then scan again |
 | `--dry-run` |  | with --fix: print the fixes as a unified diff and write nothing |
 | `--fail-on {new,all,none,error}` | `new` | new (default): baselined findings are hidden and pass; all: ignore the baseline, any finding fails; none: report what is not baselined and always exit 0; error: like new, but only error-level findings fail (warn-level ones are reported). A preview rule never fails |
@@ -217,6 +220,8 @@ brevio-core init [options]
 | `--dry-run` |  | print the plan and write nothing |
 | `--yes, -y` |  | write without asking |
 | `--undo` |  | remove what init wrote and is unchanged since |
+| `--personal` |  | install personal agent hooks and MCP config only, git-excluded via .git/info/exclude (touches no tracked files) |
+| `--wizard` |  | run the interactive onboarding wizard |
 
 ## `brevio-core aeo`
 
@@ -233,6 +238,36 @@ brevio-core aeo [options] target
 | `target` |  | a folder of built pages (with robots.txt and llms.txt at its root), or one .html page |
 | `--min SCORE` | `0` | exit 1 when a page scores below SCORE, out of 100 (default 0: report only) |
 | `--format {text,markdown,json}` | `text` | how to print the scorecard |
+| `--generate-llms` |  | write a missing llms.txt at the target folder's root from its HTML pages before scoring |
+
+## `brevio-core check`
+
+Run the pre-PR flight check (rules, test custody, test imports, conflict markers and complexity).
+
+```
+brevio-core check [options] [paths ...]
+```
+
+| Argument | Default | What it does |
+| --- | --- | --- |
+| `--base BASE` | `HEAD` | git base ref to compare against (default: HEAD) |
+| `--json` |  | output JSON receipt |
+| `--format {text,markdown,json}` | `text` | receipt format |
+| `[paths ...]` |  | optional paths to check |
+
+## `brevio-core brief`
+
+Print the zero-token rule & trap briefing for the files you are about to edit.
+
+```
+brevio-core brief [options] [files ...]
+```
+
+| Argument | Default | What it does |
+| --- | --- | --- |
+| `[files ...]` |  | files to generate briefing for |
+| `--json` |  | output briefing as JSON |
+| `--record ('RULE', 'TRAP', 'FIX')` |  | record a Trap -&gt; Fix episode for the first named file |
 
 ## `brevio-core up`
 

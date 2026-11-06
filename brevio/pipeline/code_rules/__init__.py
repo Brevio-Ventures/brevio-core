@@ -216,6 +216,9 @@ _PLACEHOLDER_RX = re.compile(r"x{4,}|\*{3,}|\.{3}|your[_-]|example|change_?me|pl
 _PUBLIC_NAME_RX = re.compile(r"public|publishable", re.I)
 _PUBLIC_CONTEXT_RX = re.compile(r"algolia|docsearch", re.I)
 _SECRET_CONTEXT = 5     # lines before a hit read for a public key kind (an Algolia block names its key `apiKey`)
+_CLIENT_BUNDLE_SECRET_ENV_RX = re.compile(
+    r"\b(?:NEXT_PUBLIC|VITE|REACT_APP)_[A-Z0-9_]*(?:SECRET|PRIVATE_KEY|SERVICE_ROLE|DATABASE_URL|PASSWORD)[A-Z0-9_]*\b"
+)
 _DANGEROUS_HTML_RX = re.compile(r"dangerouslySetInnerHTML\s*=\s*\{\s*\{\s*__html\b")
 # Sanitizers at the dangerouslySetInnerHTML sink: escapeHtml, DOMPurify.sanitize, sanitizeHtml, etc.
 _SANITIZED_HTML_RX = re.compile(r"__html\s*:\s*(?:(?:DOMPurify|dompurify|sanitizeHtml|xss)\.sanitize|escapeHtml|sanitizeHtml|DOMPurify|sanitize|escape)\s*\(", re.I)
@@ -223,15 +226,34 @@ _SANITIZED_HTML_RX = re.compile(r"__html\s*:\s*(?:(?:DOMPurify|dompurify|sanitiz
 _EVAL_RX = re.compile(r"(?<![\w$])(?:eval|Function)\s*\(")
 # In test files, eval with a static quoted string literal (no interpolation) is a test probe (E35 precision run).
 _STATIC_EVAL_RX = re.compile(r"\beval\s*\(\s*(?:\"(?:[^\"\\$]|\\.)*\"|'(?:[^'\\$]|\\.)*')\s*\)")
+_UNSAFE_SQL_RX = re.compile(
+    r"\.execute\s*\(\s*f[\"']\s*(?:SELECT|INSERT|UPDATE|DELETE)\b"
+    r"|\.\$(?:query|execute)RawUnsafe\s*\(\s*`[^`]*\$\{",
+    re.I,
+)
+_BIDI_TAG_RX = re.compile(r"[\u202a-\u202e\u2066-\u2069\U000e0000-\U000e007f]")
+_UNSAFE_SINK_RX = re.compile(
+    r"|".join((_EVAL_RX.pattern, _DANGEROUS_HTML_RX.pattern, _UNSAFE_SQL_RX.pattern, _BIDI_TAG_RX.pattern)),
+    re.I,
+)
 # Test fixture assets (e.g. tests/assets/): vendored builds kept for browser test suites run no user sinks.
 _TEST_ASSET_RX = re.compile(r"(?:^|/)(?:tests?|spec)/assets/", re.I)
 _NO_ALT_IMG_RX = re.compile(r"<img\b(?!.*?alt=)[^>]*>", re.I)
 _CLICK_ON_DIV_RX = re.compile(r"<div\b[^>]*onClick\s*=(?!.*?role=)[^>]*>", re.I)
+_TARGET_BLANK_A_RX = re.compile(r"""<a\b[^>]*\btarget\s*=\s*["']_blank["'][^>]*>""", re.I)
+_REL_NOOPENER_RX = re.compile(r"""\brel\s*=\s*["'][^"']*\bnoopener\b""", re.I)
 _UNBOUNDED_QUERY_RX = re.compile(r"\.(?:findMany|select)\s*\(\s*\{(?![^}]*take\s*:)(?![^}]*limit\s*:)", re.I)
 _AS_ANY_RX = re.compile(r"\bas\s+any(?![\w$])|\bz\.any\s*\(")
 _TS_IGNORE_RX = re.compile(r"@ts-ignore\b")
 _EMPTY_CATCH_RX = re.compile(r"\bcatch\s*(?:\([^)]*\))?\s*\{\s*\}")
 _BARE_EXCEPT_RX = re.compile(r"^\s*\+?\s*except\s*:")
+_SUBPROCESS_SHELL_RX = re.compile(
+    r"\bsubprocess\.(?:run|Popen|call|check_call|check_output)\s*\([^)]*\bshell\s*=\s*True\b"
+    r"|\bos\.system\s*\(\s*f[\"']"
+)
+_REQUESTS_CALL_RX = re.compile(r"\brequests\.(?:get|post|put|delete|patch|head)\s*\([^)]*\)")
+_TIMEOUT_KW_RX = re.compile(r"\btimeout\s*=")
+_WILDCARD_DEP_RX = re.compile(r'^\s*"(?P<key>[^"]+)"\s*:\s*"(?:\*|latest)"\s*,?\s*$')
 _WAIT_FOR_TIMEOUT_RX = re.compile(r"\bwaitForTimeout\s*\(\s*\d+")
 # A line that is only a comment runs nothing: `<img>` or `as any` in prose is not code (E35 precision run, 2026-11-05).
 _COMMENT_LINE_RX = re.compile(r"^\s*(?://|/\*|\*)")
@@ -259,7 +281,7 @@ def _random_looking(value: str) -> bool:
 
 def _hardcoded_secret(line: str, before: str) -> bool:
     """R13.1 on one code line; ``before`` is the text of the few lines above it, read for a public key kind."""
-    if _CREDENTIAL_RX.search(line):
+    if _CREDENTIAL_RX.search(line) or _CLIENT_BUNDLE_SECRET_ENV_RX.search(line):
         return True
     for m in _SECRET_ASSIGN_RX.finditer(line):
         name, val = m["name"], m["val"]
@@ -291,36 +313,60 @@ def _check_ui_patterns(rel_path: str, lno: int, line: str, findings: list[str]) 
         findings.append(f"{rel_path}:{lno}: [R18.5] `onClick` handler on non-interactive `<div>` without `role`")
 
 
+def _check_python_patterns(rel_path: str, lno: int, line: str, in_test: bool, findings: list[str]) -> None:
+    """The rules for a Python source line (``.py``)."""
+    if _BARE_EXCEPT_RX.search(line):
+        findings.append(f"{rel_path}:{lno}: [R5.4] Bare `except:` detected; specify explicit exception tuple")
+    if not in_test and not line.lstrip().startswith("#"):
+        if _SUBPROCESS_SHELL_RX.search(line):
+            findings.append(f"{rel_path}:{lno}: [R5.5] Unsafe `shell=True` subprocess or interpolated `os.system` call")
+        if _REQUESTS_CALL_RX.search(line) and not _TIMEOUT_KW_RX.search(line):
+            findings.append(f"{rel_path}:{lno}: [R10.1] Outbound `requests` call without explicit `timeout=`")
+
+
+def _check_script_patterns(rel_path: str, lno: int, line: str, in_test: bool, findings: list[str]) -> None:
+    """The rules for a JavaScript or TypeScript code line."""
+    if _AS_ANY_RX.search(line) and not in_test:
+        findings.append(f"{rel_path}:{lno}: [R9.1] Untyped escape hatch `as any` or `z.any()` in production source")
+    if _EMPTY_CATCH_RX.search(line):
+        findings.append(f"{rel_path}:{lno}: [R5.4] Empty catch block detected; handle or log the error")
+    if _unsafe_eval(rel_path, line, in_test):
+        findings.append(f"{rel_path}:{lno}: [R2.8] Unsafe `eval` or dynamic `Function` constructor detected")
+
+
+def _check_security_patterns(rel_path: str, lno: int, line: str, code: bool, ext: str, before: str, findings: list[str]) -> None:
+    """The cross-language security and manifest checks outside test files."""
+    if _hardcoded_secret(line, before):
+        findings.append(f"{rel_path}:{lno}: [R13.1] Hardcoded secret pattern detected in added code")
+    if _BIDI_TAG_RX.search(line):
+        findings.append(f"{rel_path}:{lno}: [R2.8] Hidden directional or Unicode tag control character detected")
+    if code and ext in (".py", ".ts", ".tsx", ".js", ".jsx") and _UNSAFE_SQL_RX.search(line):
+        findings.append(f"{rel_path}:{lno}: [R2.8] Raw SQL string interpolation detected; use parameterized queries")
+    if ext in (".tsx", ".jsx", ".html", ".vue", ".svelte") and code:
+        if any(not _REL_NOOPENER_RX.search(m.group(0)) for m in _TARGET_BLANK_A_RX.finditer(line)):
+            findings.append(f'{rel_path}:{lno}: [R18.2] External `target="_blank"` link without `rel="noopener noreferrer"`')
+
+
 def _check_line_patterns(rel_path: str, lno: int, line: str, findings: list[str], before: str = "") -> None:
     """Helper to evaluate single-line AST and regex rules; ``before`` is the text of the few lines above ``line``."""
     ext = os.path.splitext(rel_path)[1].lower()
     in_test = "test" in rel_path.lower()
     code = not _COMMENT_LINE_RX.match(line)     # the @ts-ignore rule still reads comments: the directive is one
-    is_script = ext in (".ts", ".tsx", ".js", ".jsx") and code
-    # A test file's credentials are fixtures and its components are never shown to a user (E35 precision run, 2026-11-05).
-    is_ui = ext in (".tsx", ".jsx") and code and not in_test
+    is_js = ext in (".ts", ".tsx", ".js", ".jsx")
 
-    if not in_test and _hardcoded_secret(line, before):
-        findings.append(f"{rel_path}:{lno}: [R13.1] Hardcoded secret pattern detected in added code")
-
+    if not in_test:
+        _check_security_patterns(rel_path, lno, line, code, ext, before, findings)
     if ext == ".py":
-        if _BARE_EXCEPT_RX.search(line):
-            findings.append(f"{rel_path}:{lno}: [R5.4] Bare `except:` detected; specify explicit exception tuple")
-
-    if ext in (".ts", ".tsx", ".js", ".jsx") and _TS_IGNORE_RX.search(line):
+        _check_python_patterns(rel_path, lno, line, in_test, findings)
+    if os.path.basename(rel_path) == "package.json":
+        if (m := _WILDCARD_DEP_RX.match(line)) and m["key"] not in ("version", "private"):
+            findings.append(f"{rel_path}:{lno}: [R16.2] Wildcard or `latest` dependency version in `package.json`")
+    if is_js and _TS_IGNORE_RX.search(line):
         findings.append(f"{rel_path}:{lno}: [R9.2] `@ts-ignore` used; use `@ts-expect-error` with explanatory reason")
-
-    if is_script:
-        if _AS_ANY_RX.search(line) and not in_test:
-            findings.append(f"{rel_path}:{lno}: [R9.1] Untyped escape hatch `as any` or `z.any()` in production source")
-        if _EMPTY_CATCH_RX.search(line):
-            findings.append(f"{rel_path}:{lno}: [R5.4] Empty catch block detected; handle or log the error")
-        if _unsafe_eval(rel_path, line, in_test):
-            findings.append(f"{rel_path}:{lno}: [R2.8] Unsafe `eval` or dynamic `Function` constructor detected")
-
-    if is_ui:
+    if is_js and code:
+        _check_script_patterns(rel_path, lno, line, in_test, findings)
+    if ext in (".tsx", ".jsx") and code and not in_test:
         _check_ui_patterns(rel_path, lno, line, findings)
-
     if in_test and _WAIT_FOR_TIMEOUT_RX.search(line):
         findings.append(f"{rel_path}:{lno}: [R6.3] `waitForTimeout` sleep in test; use deterministic assertions")
 

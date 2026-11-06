@@ -6,7 +6,7 @@
 # a write token to a run on code from a fork are never supported: the scan reads the code under review, and that code
 # must never run next to a write token (SECURITY-REVIEW.md). Third-party actions are pinned to full commit SHAs.
 name: 'Brevio Gate'
-description: 'Pull-request gate, no model call: 8 scanned rules as line patterns on the added lines, no secrets'
+description: 'Pull-request gate, no model call: 12 scanned rules as line patterns on the added lines, no secrets'
 author: 'Brevio'
 branding:
   icon: 'shield'
@@ -39,7 +39,7 @@ inputs:
   package-version:
     description: 'brevio-core version to install; the default is the release of this Action, "latest" takes the newest'
     required: false
-    default: '0.6.0'
+    default: '0.7.0'
 outputs:
   status:
     description: 'pass or fail'
