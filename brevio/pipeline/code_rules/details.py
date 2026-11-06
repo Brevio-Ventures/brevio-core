@@ -41,10 +41,18 @@ SCANS: dict[str, tuple[str, str]] = {
     "R9.2": ("code", "src/api.ts"),
     "R9.3": ("dev", "src/api.ts"),
     "R13.1": ("code", "src/client.ts"),
-    "R2.5": ("code", "src/run.ts"),
+    "R2.8": ("code", "src/run.ts"),
     "R18.1": ("code", "src/Logo.tsx"),
     "R18.5": ("code", "src/Menu.tsx"),
 }
+
+
+
+def scanned_by(engine: str) -> list[str]:
+    """The rule IDs the scanner ``engine`` checks, sorted: ``code`` is what ``brevio-core scan`` runs, ``dev`` the
+    harness's pre-flight."""
+    return sorted(rid for rid, (e, _path) in SCANS.items() if e == engine)
+
 
 DETAILS: dict[str, Detail] = {
     # R1: UI and mobile performance
@@ -86,12 +94,17 @@ DETAILS: dict[str, Detail] = {
                "const body = await req.json();\nverifySignature(body, sig);",
                "const raw = await req.text();\nverifySignature(raw, sig);\nconst body = JSON.parse(raw);"),
     "R2.5": _d("A server that fetches any URL can be pointed at your internal network, and a call with no limit can hang.",
-               "eval(userInput);",
+               "const res = await fetch(req.query.url);",
                "const url = new URL(input);\nif (!ALLOWED.has(url.host)) throw new Error('host');\nawait fetch(url, { signal: AbortSignal.timeout(5000) });"),
     "R2.6": _d("A normal string compare stops at the first wrong byte, so timing leaks the secret.",
                "if (token === expected) ok();", "if (timingSafeEqual(Buffer.from(token), Buffer.from(expected))) ok();"),
     "R2.7": _d("A cookie without these flags can be read by scripts or sent from another site.",
                "res.cookie('sid', id);", "res.cookie('sid', id, { httpOnly: true, secure: true, sameSite: 'lax' });"),
+    "R2.8": _d("Code or HTML built from a string runs whatever the string holds; with any outside input in it, that is an "
+               "injection.",
+               "eval(userInput);", "const value = JSON.parse(userInput);", "ts",
+               "Comment lines and Playwright's $eval and $$eval are not flagged; dangerouslySetInnerHTML is checked "
+               "only in .tsx and .jsx files outside tests."),
     # R3: billing
     "R3.1": _d("Gateways send an event more than once. Without a check the customer is charged or upgraded twice.",
                "await applyEvent(event);",
@@ -230,8 +243,14 @@ DETAILS: dict[str, Detail] = {
                 "const cache = new Map();", "const cache = new LRU({ max: 500, ttl: 60_000 });"),
     # R13: observability
     "R13.1": _d("A secret in a log or in code ends up in every place the log goes.",
-                "const apiKey = 'xxxxxxxxxxxxxxxxxxxx';", "const apiKey = process.env.PAYMENT_KEY;", "ts",
-                "A line that contains the word 'example' or 'test' is not flagged."),
+                "const sessionToken = 'eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiIxMjM0In0.example-signature';",
+                "const sessionToken = process.env.SESSION_TOKEN;", "ts",
+                "Only a known credential format (AWS, GitHub, Slack, Stripe live, Google API key, a private key block) "
+                "or a random-looking value bound to a secret, token, password or API key name is flagged; a JWT bound "
+                "to such a name always is. Test files are not checked. A placeholder (example, fake, test, xxxx, "
+                "your-...) is not a key. Keys that are public by design are not flagged: a name that says public or "
+                "publishable, a Stripe pk_ key, and an Algolia or DocSearch key (named so, or in the five lines below "
+                "such a name)."),
     "R13.2": _d("Plain text logs cannot be searched by field.",
                 "console.log('user ' + id + ' failed');", "log.info({ event: 'login.failed', userId: id });"),
     "R13.3": _d("Without the trace id you cannot follow one request across services.",

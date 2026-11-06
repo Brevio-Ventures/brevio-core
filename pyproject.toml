@@ -1,24 +1,30 @@
 [build-system]
-requires = ["setuptools>=68"]
+requires = ["setuptools>=77"]
 build-backend = "setuptools.build_meta"
 
 [project]
 name = "brevio-core"
-version = "0.1.0"
-description = "A zero-token pull-request gate that catches the mistakes coding agents keep repeating."
+version = "0.6.0"
+description = "Catches the mistakes coding agents repeat before they merge: a pull-request gate with no model call and no API key."
 readme = "README.md"
+keywords = ["coding agents", "agent mistakes", "pull request", "code review", "pre-commit", "github action",
+            "mcp server", "agent hooks", "static analysis", "code quality"]
 requires-python = ">=3.10"
-license = {text = "Apache-2.0"}
+license = "Apache-2.0"
 authors = [{name = "Brevio"}]
 dependencies = []
 classifiers = [
-    "License :: OSI Approved :: Apache Software License",
+    "Development Status :: 3 - Alpha",
+    "Environment :: Console",
+    "Intended Audience :: Developers",
     "Programming Language :: Python :: 3",
     "Programming Language :: Python :: 3.10",
     "Programming Language :: Python :: 3.11",
     "Programming Language :: Python :: 3.12",
     "Programming Language :: Python :: 3.13",
     "Topic :: Software Development :: Quality Assurance",
+    "Topic :: Software Development :: Testing",
+    "Topic :: Software Development :: Version Control :: Git",
 ]
 
 [project.urls]

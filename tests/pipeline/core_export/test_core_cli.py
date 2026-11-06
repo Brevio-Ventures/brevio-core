@@ -9,9 +9,13 @@ import sys
 import tempfile
 import unittest
 
+from brevio.pipeline.code_rules import PR_RULES_122
+
 HERE = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.dirname(os.path.dirname(os.path.dirname(HERE)))
-SECRET_LINE = "const apiKey = 'fake_secret_key_1234567890abcdef';\n"
+# A fake key in the AWS access key format (AWS's documented example key ID), joined at run time so this file is not
+# itself a finding of a secret scan. The hardcoded-secret rule (R13.1) flags the format (E35 precision run, 2026-11-05).
+SECRET_LINE = "const apiKey = '" + "AKIA" + "IOSFODNN7EXAMPLE" + "';\n"
 CLEAN_LINE = "export const add = (a: number, b: number): number => a + b;\n"
 _RUN = "import sys; sys.path.insert(0, sys.argv[1]); from brevio.pipeline import core_cli; raise SystemExit(core_cli.main(sys.argv[2:]))"
 
@@ -56,6 +60,53 @@ class TestScanCommand(unittest.TestCase):
             write(d, "src/y.ts", SECRET_LINE)
             self.assertEqual(run_cli(d, "scan", "--diff", "HEAD").returncode, 1)
 
+    # Third-party code kept in a repository gave most false positives of the E35 precision run: Playwright keeps
+    # minified and bundled builds as test assets (docs/benchmarks/precision.md, 2026-11-05).
+    UPSTREAM = {"third_party/lib/a.ts": SECRET_LINE, "third-party/b.js": "eval(code);\n", "src/vendor/c.ts": SECRET_LINE,
+                "assets/modernizr.min.js": "eval(code);\n", "assets/lib.min.mjs": "eval(code);\n",
+                "static/js/main.3f2a1b9c.chunk.js": "eval(code);\n", "dist2/app.bundle.js": "eval(code);\n",
+                "out/index-4be0c13d.js": "eval(code);\n",
+                "tests/assets/modernizr/modernizr.js": "(()=>{var j=0;" + "x=1;" * 200 + "})();\n" + "eval(code);\n"}
+
+    def test_a_folder_scan_skips_vendored_minified_and_bundled_files(self):
+        with tempfile.TemporaryDirectory() as d:
+            for rel, text in self.UPSTREAM.items():
+                write(d, rel, text)
+            write(d, "src/own.ts", "const header = 'x';\n" + SECRET_LINE)
+            write(d, "src/index-page.js", "eval(code);\n")          # a word after the dash, not a hash
+            res = run_cli(d, "scan")
+            self.assertEqual(res.returncode, 1, res.stderr)
+            self.assertEqual(sorted({ln.split(":")[0] for ln in res.stdout.splitlines() if ": [R" in ln}),
+                             ["src/index-page.js", "src/own.ts"])
+
+    def test_a_diff_scan_skips_vendored_minified_and_bundled_files(self):
+        with tempfile.TemporaryDirectory() as d:
+            git(d, "init", "-q")
+            write(d, "app.ts", CLEAN_LINE)
+            git(d, "add", "-A")
+            git(d, "commit", "-qm", "base")
+            for rel, text in self.UPSTREAM.items():
+                write(d, rel, text)
+            git(d, "add", "-A")                                    # tracked, so the diff carries them, not ls-files
+            r = run_cli(d, "scan", "--diff", "HEAD")
+            self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+
+    def test_every_scan_mode_skips_typescript_declaration_files(self):
+        """A declaration holds no code that runs; Playwright's protocol.d.ts gave R2.8 hits on doc prose (E35, 2026-11-06)."""
+        prose = "which includes eval(), Function(), setTimeout() and setInterval()\n"
+        with tempfile.TemporaryDirectory() as d:
+            git(d, "init", "-q")
+            write(d, "app.ts", CLEAN_LINE)
+            git(d, "add", "-A")
+            git(d, "commit", "-qm", "base")
+            for rel in ("types/protocol.d.ts", "types/index.d.mts", "types/index.d.cts"):
+                write(d, rel, prose + SECRET_LINE)
+            for args in (("scan",), ("scan", "types"), ("scan", "--file", "types/protocol.d.ts"), ("scan", "--diff", "HEAD")):
+                r = run_cli(d, *args)
+                self.assertEqual((r.returncode, r.stdout), (0, ""), args)
+            write(d, "types/protocol.ts", prose)
+            self.assertIn("types/protocol.ts:1: [R2.8]", run_cli(d, "scan").stdout)
+
     def test_a_folder_is_walked_and_the_default_is_the_current_folder(self):
         with tempfile.TemporaryDirectory() as d:
             write(d, "src/deep/bad.ts", SECRET_LINE)
@@ -89,7 +140,7 @@ class TestScanCommand(unittest.TestCase):
             hit = log["runs"][0]["results"][0]
             self.assertEqual(hit["ruleId"], "R13.1")
             self.assertEqual(hit["locations"][0]["physicalLocation"]["region"]["startLine"], 2)
-            self.assertEqual(len(log["runs"][0]["tool"]["driver"]["rules"]), 122)
+            self.assertEqual(len(log["runs"][0]["tool"]["driver"]["rules"]), len(PR_RULES_122))
 
     def test_diff_mode_flags_only_the_lines_added_against_the_base(self):
         with tempfile.TemporaryDirectory() as d:
