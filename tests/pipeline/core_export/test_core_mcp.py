@@ -86,7 +86,8 @@ class TestProtocol(unittest.TestCase):
         self.assertIn("tools", init["capabilities"])
         tools = {t["name"]: t for t in replies[1]["result"]["tools"]}
         has_fix = os.path.isfile(os.path.join(TREE, "brevio", "pipeline", "code_rules", "fixers.py"))   # the 0.3 set adds fix
-        self.assertEqual(sorted(tools), ["explain", *(["fix"] if has_fix else []), "learn", "list_rules", "scan"])
+        has_brief = os.path.isfile(os.path.join(TREE, "brevio", "pipeline", "core_memory.py"))          # the 0.6 set adds brief
+        self.assertEqual(sorted(tools), [*(['brief'] if has_brief else []), "explain", *(["fix"] if has_fix else []), "learn", "list_rules", "scan"])
         for t in tools.values():
             self.assertEqual(t["inputSchema"]["type"], "object")
         self.assertTrue(tools["scan"]["annotations"]["readOnlyHint"])

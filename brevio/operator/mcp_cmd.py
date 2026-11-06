@@ -129,6 +129,27 @@ def _learn_module() -> Any:
         return None
 
 
+def _memory_module() -> Any:
+    return core_cli.set_module("pipeline", "core_memory")
+
+
+def _tool_brief(args: dict[str, Any]) -> ToolResult:
+    memory = _memory_module()
+    files = _text_list(args, "files")
+    outside = [p for p in files if not _inside_folder(p)]
+    if outside:
+        raise ToolError(f"outside the project folder: {', '.join(outside)}")
+    brief = memory.brief_for_files(files, cwd=os.getcwd())
+    lines: list[str] = []
+    if brief.get("micro_rules"):
+        lines.append(str(brief["micro_rules"]).strip())
+    for ep in brief.get("episodes", []):
+        lines.append(f"[{ep.get('rule_id', '')}] {ep.get('file', '')}: {ep.get('trap', '')} -> {ep.get('fix', '')}")
+    if brief.get("neighbors"):
+        lines.append(f"1-hop neighbors: {', '.join(brief['neighbors'][:10])}")
+    return "\n".join(lines) or "No active rules or past traps found for the specified files.", brief
+
+
 def _tool_learn(args: dict[str, Any]) -> ToolResult:
     learn = _learn_module()
     base = _base(args, "diff_base") or "HEAD~1"
@@ -178,6 +199,10 @@ TOOLS: dict[str, tuple[str, dict[str, Any], bool, Callable[[dict[str, Any]], Too
               ".agents/rules/ in the project.",
               _schema({"diff_base": {**_STR, "description": "The commit or range holding the fix (default HEAD~1)."}, "name": _STR}),
               False, _tool_learn),
+    "brief": ("Return the surface-scoped engineering rules, recalled trap-to-fix episodes and 1-hop file neighbors for "
+              "the files you are about to edit.",
+              _schema({"files": {"type": "array", "items": _STR, "description": "Files inside the project about to be edited."}}),
+              True, _tool_brief),
 }
 
 
@@ -189,7 +214,7 @@ def server_version() -> str:
 
 
 def _available() -> dict[str, tuple[str, dict[str, Any], bool, Callable[[dict[str, Any]], ToolResult]]]:
-    absent = {"learn": _learn_module() is None, "fix": core_cli.fixers() is None}
+    absent = {"learn": _learn_module() is None, "fix": core_cli.fixers() is None, "brief": _memory_module() is None}
     return {n: t for n, t in TOOLS.items() if not absent.get(n)}
 
 

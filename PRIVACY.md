@@ -9,6 +9,10 @@ brevio-core collects nothing about you or your code. `scan`, the agent hook and 
 nothing. No command counts its use or reports it anywhere, and there is no setting to turn that on.
 [SECURITY-REVIEW.md](SECURITY-REVIEW.md) lists what each command reads, writes and sends.
 
+Local trap-to-fix episode memory written by `brevio-core brief --record` stays on disk in `.brevio/file_memory.json`.
+`brevio-core up` only inspects local `.brevio/` files to preview what a team sync would share and prints a waitlist
+link, making zero network calls.
+
 ## Contributors
 
 When you contribute, this is kept:
@@ -39,9 +43,9 @@ We answer within one month. You may also complain to your data protection author
 
 ## Before `share` or `up` sends anything
 
-`share` is not part of this release. `up` in this release only lists the files a team sync would take, with their
-sizes and fields, and prints the waitlist link; it uploads nothing and makes no link. When the sending forms ship, each
-one shows a prompt like the ones below before
+`share` is not part of this release. `up` in this release only inspects local `.brevio/` files to preview what a team
+sync would share, with their sizes and fields, and prints the waitlist link, making zero network calls; it uploads
+nothing and makes no link. When the sending forms ship, each one shows a prompt like the ones below before
 anything leaves your machine, the answer defaults to no, and they never take the answer from an agent: the agent hook
 and the MCP server cannot run them. In a run with no terminal to ask in, they stop and say how to give consent.
 

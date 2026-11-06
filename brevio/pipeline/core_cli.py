@@ -30,7 +30,7 @@ from collections import Counter
 from collections.abc import Callable, Iterable
 from typing import Any
 
-from brevio.pipeline import leak_scan
+from brevio.pipeline import dev_rules, leak_scan
 from brevio.pipeline.code_rules import DEPRECATED, PR_RULES_122, PREVIEW, rule_status, scan_lines
 from brevio.pipeline.code_rules import docs as rule_docs
 from brevio.pipeline.code_rules.details import DETAILS, scanned_by
@@ -153,6 +153,9 @@ def skipped(path: str) -> bool:
             or bool(_BUNDLE_NAME.search(parts[-1])))
 
 
+_DEV_FINDING = re.compile(r"^- (?P<path>.+?):(?P<line>\d+) \[(?P<rule>R\d+\.\d+)\b[^\]]*\]: (?P<msg>.*)$")
+
+
 def scan(files: Numbered, proj: Any = None) -> list[str]:
     """Findings (``path:line: [rule] message``) for the given numbered lines.
 
@@ -164,6 +167,37 @@ def scan(files: Numbered, proj: Any = None) -> list[str]:
         if proj is None or not proj.for_path(rel).excluded:
             found += scan_lines(rel, numbered)
     return [f for f in found if _runs(f, proj)]
+
+
+def scan_surface(files: Numbered, proj: Any = None) -> list[str]:
+    """Run both the 8 line-pattern rules (``code_rules``) and the 9 surface rules (``dev_rules``) across ``files``."""
+    proj = project(files) if proj is None else proj
+    found = list(scan(files, proj))
+    seen = {(f["path"], f["line"], f["rule"]) for f in map(finding_fields, found) if f}
+    for rel, numbered in sorted(files.items()):
+        if proj is not None and proj.for_path(rel).excluded:
+            continue
+        full_text = ""
+        if os.path.isfile(rel):
+            try:
+                with open(rel, encoding="utf-8", errors="ignore") as fh:
+                    full_text = fh.read()
+            except OSError:
+                full_text = ""
+        if not full_text:
+            full_text = "\n".join(t for _, t in numbered)
+        for raw in dev_rules._scan_single_file(rel, full_text, numbered):
+            m = _DEV_FINDING.match(raw)
+            if not m:
+                continue
+            key = (m["path"], int(m["line"]), m["rule"])
+            if key in seen:
+                continue
+            norm = f"{m['path']}:{m['line']}: [{m['rule']}] {m['msg']}"
+            if _runs(norm, proj):
+                found.append(norm)
+                seen.add(key)
+    return found
 
 
 def _catalogued(finding: str) -> tuple[str, str]:
@@ -511,7 +545,8 @@ def _run_scan(named: list[str], args: argparse.Namespace) -> int:
     fail_on = getattr(args, "fail_on", "new")
     lines = select_lines(named, args.diff)
     proj = project(lines)
-    shown, silenced, baselined = triage(scan(lines, proj), fail_on, not args.forbid_ignores)
+    raw = scan_surface(lines, proj) if getattr(args, "surface", False) else scan(lines, proj)
+    shown, silenced, baselined = triage(raw, fail_on, not args.forbid_ignores)
     if args.diff is not None and not getattr(args, "allow_new_suppressions", True):
         shown += new_suppressions(lines, args.diff)
     for w in warnings(lines) + (proj.warnings(PR_RULES_122) if proj is not None else []):
@@ -571,12 +606,26 @@ def upgrade_line(ref: str, wanted: bool = True) -> str:
 
 
 AEO_MODULE = "core_aeo"         # the 0.6 set's ``aeo``, the AEO rubric on local pages (ADOPTION.md 0.29); absent before it
+CHECK_MODULE = "core_gates"     # the 0.6 set's ``check`` pre-PR flight check
+BRIEF_MODULE = "core_memory"    # the 0.6 set's ``brief`` surface rules & trap recall
 
 
 def aeo_command() -> tuple[dict[str, Callable[[list[str]], int]], dict[str, str]]:
     """``({"aeo": main}, {"aeo": help})`` in a build that ships ``aeo``, else two empty tables."""
     mod = set_module("pipeline", AEO_MODULE)
     return ({"aeo": mod.main}, {"aeo": mod.HELP}) if mod is not None else ({}, {})
+
+
+def check_command() -> tuple[dict[str, Callable[[list[str]], int]], dict[str, str]]:
+    """``({"check": main}, {"check": help})`` in a build that ships ``check``, else two empty tables."""
+    mod = set_module("pipeline.gates", CHECK_MODULE)
+    return ({"check": mod.main}, {"check": mod.HELP}) if mod is not None else ({}, {})
+
+
+def brief_command() -> tuple[dict[str, Callable[[list[str]], int]], dict[str, str]]:
+    """``({"brief": main}, {"brief": help})`` in a build that ships ``brief``, else two empty tables."""
+    mod = set_module("pipeline", BRIEF_MODULE)
+    return ({"brief": mod.main}, {"brief": mod.HELP}) if mod is not None else ({}, {})
 
 
 def _add_baseline_arguments(sub: Any, sc: argparse.ArgumentParser) -> None:
@@ -620,6 +669,8 @@ def parser(tools: Iterable[str], tool_help: dict[str, str]) -> argparse.Argument
     sc.add_argument("--sarif", metavar="FILE", help="also write the findings to FILE as SARIF")
     sc.add_argument("--forbid-ignores", action="store_true",
                     help="never honour an ignore comment (the agent hook runs with this, so an agent cannot silence a rule)")
+    sc.add_argument("--surface", action="store_true",
+                    help="also run the 9 surface-scoped rules (UI blur, SSR reveal, GTM deferral, webhook HMAC, integer cents, self-mocking tests, weak assertions, contract purity, package imports)")
     if fixers() is not None:
         sc.add_argument("--fix", action="store_true", help="rewrite in place what a rule has one correct fix for, then scan again")
         sc.add_argument("--dry-run", action="store_true", help="with --fix: print the fixes as a unified diff and write nothing")
@@ -668,17 +719,43 @@ def _dispatch(args: argparse.Namespace) -> int:
 
 def line_commands() -> tuple[dict[str, Callable[[list[str]], int]], dict[str, str]]:
     """``(commands, help)`` of every command that reads the rest of its line itself, in the order ``--help`` lists them:
-    the agent tools, ``init``, ``aeo`` and ``up``, each where the build ships it."""
+    the agent tools, ``init``, ``aeo``, ``check``, ``brief`` and ``up``, each where the build ships it."""
     tools, tool_help = agent_tools()
-    for more, more_help in (init_command(), aeo_command(), up_command()):
+    for more, more_help in (init_command(), aeo_command(), check_command(), brief_command(), up_command()):
         tools, tool_help = {**tools, **more}, {**tool_help, **more_help}
     return tools, tool_help
+
+
+def _interactive_entry(tools: dict[str, Callable[[list[str]], int]]) -> int:
+    """Zero-argument interactive TTY dispatcher: onboarding wizard on first run, quick-action menu thereafter."""
+    code, top = _git("rev-parse", "--show-toplevel")
+    root = os.path.normpath(top.strip()) if not code and top.strip() else "."
+    if "init" in tools and not os.path.isfile(os.path.join(root, ".brevio", "init.json")):
+        return tools["init"](["--wizard"])
+    print("brevio-core interactive quick actions:\n"
+          "  [1] Scan uncommitted changes (scan --diff HEAD) [default]\n"
+          "  [2] Run Pre-PR Flight Check (check)\n"
+          "  [3] Compile last fix into a guard (learn)\n"
+          "  [4] Run interactive setup wizard (init --wizard)")
+    try:
+        choice = input("Choose [1/2/3/4] (Enter for 1): ").strip()
+    except EOFError:
+        choice = "1"
+    if choice == "2" and "check" in tools:
+        return tools["check"]([])
+    if choice == "3" and "learn" in tools:
+        return tools["learn"]([])
+    if choice == "4" and "init" in tools:
+        return tools["init"](["--wizard"])
+    return main(["scan", "--diff", "HEAD"] if has_head() else ["scan"])
 
 
 def main(argv: list[str] | None = None) -> int:
     tools, tool_help = line_commands()
     ap = parser(tools, tool_help)
     line = sys.argv[1:] if argv is None else argv
+    if not line and sys.stdin.isatty() and sys.stdout.isatty():
+        return _interactive_entry(tools)
     if line and line[0] in tools:
         return tools[line[0]](line[1:])
     args = ap.parse_args(line)

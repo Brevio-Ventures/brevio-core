@@ -79,123 +79,6 @@ To scan whole files instead, name them, or nothing for the current folder:
 brevio-core scan
 ```
 
-## Set it up in one step
-
-<!-- readme-test -->
-```sh
-brevio-core init --dry-run
-```
-
-`--dry-run` shows, as a diff, what `brevio-core init` would write, and writes nothing. `init` writes a pull-request
-workflow like the one above (pinned to this release), a block of agent rules in `AGENTS.md` and a baseline, so the
-first local run is quiet. `--with precommit,hook,mcp` adds the pre-commit entry, the agent hook and the MCP server
-config. It asks before it writes (`--yes` skips the question), never rewrites a file you have, and records what it
-wrote in `.brevio/init.json`; `brevio-core init --undo` removes what it wrote and you have not changed since.
-
-## Adopt it on a repository that already has findings
-
-```
-brevio-core baseline                 # record the findings the repository has now in .brevio/baseline.json
-brevio-core scan                     # report only the findings that are not in the baseline
-brevio-core scan --fail-on none      # report them but never fail, for a trial week
-brevio-core scan --fail-on all       # leave the baseline out: every finding fails
-```
-
-A baseline entry names the file, the rule and a hash of the line's text, not its line number, so moving a line does
-not make it new. Commit the file. Run `baseline` again after a fix and the fixed entries drop out. The file holds one
-entry per line, sorted, so branches that add entries merge cleanly.
-
-## Silence one finding, with a reason
-
-```ts
-// brevio-core: ignore R9.2 -- the generated client has no type for this field
-// @ts-ignore
-```
-
-The comment goes on the line or the line above, and silences that rule there. Without `-- reason` it does not count,
-and the scan warns about it and about a rule ID that does not exist. The summary line counts what was silenced, and
-SARIF carries each one as a suppression with its reason, which code scanning shows.
-
-Only a person can silence the gate. The agent hook and the MCP tools never honour an ignore comment
-(`--forbid-ignores`), and a diff scan reports each ignore comment and baseline entry the change adds as a finding,
-"new suppression: needs a human review", until a reviewer allows it with `--allow-new-suppressions`.
-
-## A report for the pull request
-
-`brevio-core scan --diff origin/main --format markdown` prints the findings as a Markdown table of rule, file and line,
-and why, for a job summary or a pull request comment. `--rules-url BASE` links each rule ID to its page at `BASE`
-followed by the ID. Paths and lines from the repository are escaped, so a file name cannot add a mention or a link.
-
-## Configure it for a team
-
-Put a `brevio-core.toml` at the root of the repository, and another in any folder that needs its own settings. For a
-file, the files from the root down to its folder apply in that order, so the nearest one wins.
-
-```toml
-extends = "policy/brevio-core.toml"   # an org policy, read first (see below)
-select = ["R9", "R13.1"]              # the rules that run: an ID, a group or a glob (default: every rule)
-ignore = ["R6.3"]                     # rules that do not run
-exclude = ["generated/**", "*.pb.ts"] # paths not scanned, relative to this file's folder
-level = "warn"                        # the level of every rule (default: error)
-
-[rules."R13.1"]
-level = "error"                       # the level of one rule
-
-[[overrides]]
-paths = ["legacy/**"]                 # relative to this file's folder
-ignore = ["R9.1"]                     # rules that do not run on these paths
-rules = ["R9"]                        # the rules the level applies to (default: every rule)
-level = "warn"
-```
-
-A nearer file replaces `select` and `ignore`; `exclude` and `[[overrides]]` add up; for a level, the last setting that
-names the rule wins. An unknown key, a wrong value or a broken file stops the scan as a usage error, and a rule pattern
-that matches no rule is a warning. Write a rule ID in quotes as a table name, as in `[rules."R13.1"]`.
-
-Every scan already skips code a project keeps but did not write: dependencies and build output (`node_modules/`,
-`dist/`, `build/`, `.next/`, virtual environments), vendored folders (`vendor/`, `third_party/`, `third-party/`),
-minified files (`*.min.js`, `*.min.mjs`, `*.min.cjs`, `*.min.css`), bundle chunks (`*.chunk.js`, `*.bundle.js`,
-`chunk-*.js`, and names that end in a hex hash, such as `index-<hash>.js`) and any file whose first two lines are
-longer than five hundred characters. A file named on the command line is scanned as asked. No rule reads a TypeScript
-declaration file (`*.d.ts`, `*.d.mts`, `*.d.cts`), named or not: it holds types, no code that runs. Exclude more, such
-as generated code or a third-party folder with another name, with `exclude`.
-
-`brevio-core config src/app.ts` shows what applies to a file or folder: the files it comes from, whether it is
-excluded, and each rule that runs there with its level and status (`--json` for a tool).
-
-`brevio-core scan --fail-on error` (in the Action, `fail-on: error`) fails only on error-level findings and reports the
-warn-level ones; the default, `--fail-on new`, fails on every new finding whatever its level. A preview rule never
-fails a scan (see [RULES-STABILITY.md](RULES-STABILITY.md)). A config can turn rules off, so a diff scan reports a
-change that adds or edits a `brevio-core.toml` as a new suppression, as it does an ignore comment.
-
-### An org policy with `extends`
-
-`extends` reads a policy file before the file that names it; the policy's paths are relative to that file's folder.
-
-- `extends = "policy/brevio-core.toml"`: a file vendored into the repository, pinned by your own history.
-- `extends = "policy@<commit SHA>"`: a folder that is a git checkout, such as a submodule, at that commit.
-- `extends = "<git URL>@<commit SHA>"`: the submodule whose URL in `.gitmodules` is that URL, at that commit.
-
-`extends` reads only files already in your checkout: brevio-core does not fetch a policy (`scan`, the agent hook and
-the MCP server use no network and send nothing). When the checkout is missing or at another commit, the scan stops and
-says so, and `git submodule update --init` fixes it. To move to a new policy, update the submodule and the
-SHA in one pull request.
-
-### Roll it out
-
-1. **Observe.** Run `brevio-core scan --fail-on none` in CI for a week: everything is reported, nothing fails.
-2. **Warn on new.** Record what is there with `brevio-core baseline`, set `level = "warn"` in `brevio-core.toml` and
-   run `--fail-on error`: new findings show on the pull request and nothing blocks.
-3. **Block on new.** Raise the rules you trust to `level = "error"`, one by one or with `[[overrides]]` for the paths
-   that are ready. Their new findings now fail the check.
-4. **Tighten.** Fix baseline entries and run `brevio-core baseline` again so they drop out, raise the last rules to
-   error, then go back to the default `--fail-on new`.
-
-### GitHub Enterprise Server
-
-It works with the `.pyz` from the GitHub release, vendored into your repository, and with a PyPI mirror for `pip`.
-This is untested: no one has run it on GitHub Enterprise Server yet.
-
 <!-- mcp-name: io.github.Brevio-Ventures/brevio-core -->
 
 ## Use it from your agent
@@ -260,19 +143,12 @@ brevio-core scan --diff --sarif out.sarif
 
 The exit code is 0 when nothing is found, 1 when there are findings and 2 for a usage error.
 
-## Fix what has one correct fix
+Additional commands for local workflows:
 
-```
-brevio-core scan --fix --dry-run    # print the fixes as a unified diff, write nothing
-brevio-core scan --fix              # rewrite the files in place, then scan again
-brevio-core scan --fix --diff main  # fix only the lines your change adds
-```
-
-A rule gets a fixer only when it has one correct rewrite, applied by code, never by a model: a `@ts-ignore` comment
-becomes `@ts-expect-error`, and a bare Python `except:` becomes `except BaseException:`, which catches the same things.
-Every other finding, a hardcoded secret above all, is reported and left for you. The command prints what it fixed and
-what remains, and fails while anything remains. Running it twice changes nothing the second time. The MCP server has
-a `fix` tool that returns the same diff and writes only when asked.
+- `brevio-core check`: pre-PR flight check (rules, test custody, test imports, conflict markers and complexity).
+- `brevio-core brief`: file-scoped rules & trap memory briefing before agent edits.
+- `brevio-core init --personal`: personal stealth mode via `.git/info/exclude` without touching tracked files.
+- `brevio-core aeo --generate-llms`: score built HTML pages and generate missing `llms.txt`.
 
 ## GitHub Action
 
