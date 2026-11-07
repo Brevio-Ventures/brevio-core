@@ -188,18 +188,31 @@ def _schema(properties: dict[str, Any]) -> dict[str, Any]:
     return {"type": "object", "properties": properties, "additionalProperties": False}
 
 
+def _annotations(title: str, *, read_only: bool = True) -> dict[str, Any]:
+    return {
+        "title": title,
+        "readOnlyHint": read_only,
+        "destructiveHint": False,
+        "idempotentHint": True,
+        "openWorldHint": False,
+    }
+
+
 _STR = {"type": "string"}
-TOOLS: dict[str, tuple[str, dict[str, Any], bool, Callable[[dict[str, Any]], ToolResult]]] = {
+TOOLS: dict[str, tuple[str, dict[str, Any], dict[str, Any], Callable[[dict[str, Any]], ToolResult]]] = {
     "scan": ("Scan files, folders or the lines a change adds against the code rules. Returns one line per finding: "
              f"path:line [rule] message -> a fix hint, grouped by rule, at most {core_cli.AGENT_MAX}. With no arguments it scans the "
              "uncommitted changes (the whole folder when there is no commit). An ignore comment does not count here.",
              _schema({"paths": {"type": "array", "items": _STR, "description": "Files or folders inside the project."},
                       "diff_base": {**_STR, "description": "Scan only the lines added against this git revision "
-                                    "(an empty string means origin/main)."}}), True, _tool_scan),
+                                    "(an empty string means origin/main)."}}),
+             _annotations("Scan Code Against Rules", read_only=True), _tool_scan),
     "explain": ("Return the page of one rule: what it catches, why, a bad and a good example.",
-                {**_schema({"rule": {**_STR, "description": "A rule id such as R2.1."}}), "required": ["rule"]}, True, _tool_explain),
+                {**_schema({"rule": {**_STR, "description": "A rule id such as R2.1."}}), "required": ["rule"]},
+                _annotations("Explain Code Rule", read_only=True), _tool_explain),
     "list_rules": ("List the rule ids with a one-line summary each, optionally only those matching a word.",
-                   _schema({"query": _STR}), True, _tool_list_rules),
+                   _schema({"query": {**_STR, "description": "Optional word or rule id prefix to filter the rule list."}}),
+                   _annotations("List Code Rules", read_only=True), _tool_list_rules),
     "fix": ("Fix what a rule has one correct rewrite for (for example `@ts-ignore` to `@ts-expect-error`). Returns the "
             "unified diff; writes the files only when write is true. Secrets and other findings are never fixed, only "
             "counted as remaining.",
@@ -207,18 +220,20 @@ TOOLS: dict[str, tuple[str, dict[str, Any], bool, Callable[[dict[str, Any]], Too
                      "diff_base": {**_STR, "description": "Fix only the lines added against this git revision "
                                    "(an empty string means origin/main)."},
                      "write": {"type": "boolean", "description": "Rewrite the files in place (default false: diff only)."}}),
-            False, _tool_fix),
+            _annotations("Apply Deterministic Rule Fixes", read_only=False), _tool_fix),
     "learn": ("Compile a fixed defect (a git diff) into a local guard and an agent rule. Writes .brevio/guards.json and "
               ".agents/rules/ in the project.",
-              _schema({"diff_base": {**_STR, "description": "The commit or range holding the fix (default HEAD~1)."}, "name": _STR}),
-              False, _tool_learn),
+              _schema({"diff_base": {**_STR, "description": "The commit or range holding the fix (default HEAD~1)."},
+                       "name": {**_STR, "description": "Optional short title for the compiled guard."}}),
+              _annotations("Compile Fixed Defect Into Local Guard", read_only=False), _tool_learn),
     "brief": ("Return the surface-scoped engineering rules, recalled trap-to-fix episodes and 1-hop file neighbors for "
               "the files you are about to edit.",
               _schema({"files": {"type": "array", "items": _STR, "description": "Files inside the project about to be edited."}}),
-              True, _tool_brief),
+              _annotations("Brief Rules And Trap Memory For Files", read_only=True), _tool_brief),
     "check": ("Run the pre-PR flight check (surface rules, test custody, imports, migrations, complexity, and conflict markers).",
-              _schema({"base": _STR, "paths": {"type": "array", "items": _STR}}),
-              True, _tool_check),
+              _schema({"base": {**_STR, "description": "Git revision to diff against (default HEAD)."},
+                       "paths": {"type": "array", "items": _STR, "description": "Files or folders inside the project to check."}}),
+              _annotations("Run Pre-PR Flight Check", read_only=True), _tool_check),
 }
 
 
@@ -229,7 +244,7 @@ def server_version() -> str:
     return SERVER_VERSION_FIX if core_cli.fixers() is not None else SERVER_VERSION
 
 
-def _available() -> dict[str, tuple[str, dict[str, Any], bool, Callable[[dict[str, Any]], ToolResult]]]:
+def _available() -> dict[str, tuple[str, dict[str, Any], dict[str, Any], Callable[[dict[str, Any]], ToolResult]]]:
     absent = {
         "learn": _learn_module() is None,
         "fix": core_cli.fixers() is None,
@@ -240,8 +255,8 @@ def _available() -> dict[str, tuple[str, dict[str, Any], bool, Callable[[dict[st
 
 
 def tool_list() -> list[dict[str, Any]]:
-    return [{"name": n, "description": d, "inputSchema": schema, "annotations": {"readOnlyHint": read_only}}
-            for n, (d, schema, read_only, _fn) in _available().items()]
+    return [{"name": n, "description": d, "inputSchema": schema, "annotations": dict(ann)}
+            for n, (d, schema, ann, _fn) in _available().items()]
 
 
 def call_tool(params: Any) -> dict[str, Any]:

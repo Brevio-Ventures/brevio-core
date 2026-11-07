@@ -42,6 +42,7 @@ def main(argv: list[str] | None = None, prog: str = "cli.py gain") -> int:
     print("───────────────────────────────────────────────────────────────")
     print("  Shareable Verified Receipt:")
     print(f"  {receipt}")
+    print(f"  Markdown Badge: [![Verified by brevio-core]({receipt})](https://brevio.pro/tools/rules-encyclopedia)")
     print("═══════════════════════════════════════════════════════════════")
     teams = core_cli.upgrade_line("gain", not getattr(args, "no_upgrade_line", False))
     if teams:

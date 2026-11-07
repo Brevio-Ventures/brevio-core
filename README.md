@@ -21,7 +21,7 @@ jobs:
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
         with:
           fetch-depth: 0
-      - uses: Brevio-Ventures/brevio-core@v0.7.0
+      - uses: Brevio-Ventures/brevio-core@v0.8.0
         with:
           sarif: true
 ```
@@ -43,20 +43,21 @@ written down for review and for agents, with no scanner in this package yet. Eve
 
 ## Run it without installing
 
-Version 0.7.0, Python 3.10 or newer, no runtime dependencies. In a repository, scan the lines your change adds:
+Version 0.8.0, Python 3.10 or newer, no runtime dependencies. In a repository, scan the lines your change adds:
 
 ```sh
-uvx brevio-core@0.7.0 scan --diff
+uvx brevio-core@0.8.0 scan --diff
+uvx brevio-core@0.8.0 score
 ```
 
 ```sh
-pipx run --spec brevio-core==0.7.0 brevio-core scan --diff
+pipx run --spec brevio-core==0.8.0 brevio-core scan --diff
 ```
 
 Or install it, then run it the same way:
 
 ```sh
-pip install brevio-core==0.7.0
+pip install brevio-core==0.8.0
 ```
 
 <!-- readme-test -->
@@ -110,7 +111,7 @@ run changes nothing.
 }
 ```
 
-Without a global install, use `"command": "uvx"` and `"args": ["brevio-core@0.7.0", "mcp"]`. Start the client in the project
+Without a global install, use `"command": "uvx"` and `"args": ["brevio-core@0.8.0", "mcp"]`. Start the client in the project
 folder: the server reads that folder and nothing else. The tools are `scan` (paths, or a diff base), `explain` (a rule
 id, returns the rule page), `list_rules` and `learn` (compiles a fixed defect into a guard).
 
@@ -145,6 +146,7 @@ The exit code is 0 when nothing is found, 1 when there are findings and 2 for a 
 
 Additional commands for local workflows:
 
+- `brevio-core score`: compute the repository's AI-Code Readiness Score and letter grade (`--badge`, `--markdown`, `--json`).
 - `brevio-core check`: pre-PR flight check (rules, test custody, test imports, conflict markers and complexity).
 - `brevio-core brief`: file-scoped rules & trap memory briefing before agent edits.
 - `brevio-core init --personal`: personal stealth mode via `.git/info/exclude` without touching tracked files.
@@ -156,7 +158,7 @@ The workflow at the top runs the scan on the lines a pull request adds. It write
 marks each finding on the changed file. With `pull-requests: write` it keeps one comment on the pull request up to date
 while there are findings, and marks it resolved once they are gone; a pull request from a fork gets the summary only.
 With `sarif: true` and `security-events: write` it uploads the findings to code scanning. It needs no secret and no
-API key. The tag `v0.7.0` runs exactly brevio-core 0.7.0. To follow every release instead, write
+API key. The tag `v0.8.0` runs exactly brevio-core 0.8.0. To follow every release instead, write
 `uses: Brevio-Ventures/brevio-core@v0`; to pin a commit, see [SECURITY-REVIEW.md](SECURITY-REVIEW.md). It runs on
 `pull_request`, `merge_group` and `push`, and refuses any other event.
 
@@ -165,7 +167,7 @@ API key. The tag `v0.7.0` runs exactly brevio-core 0.7.0. To follow every releas
 ```yaml
 repos:
   - repo: https://github.com/Brevio-Ventures/brevio-core
-    rev: v0.7.0
+    rev: v0.8.0
     hooks:
       - id: brevio-core
 ```
