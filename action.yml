@@ -39,7 +39,7 @@ inputs:
   package-version:
     description: 'brevio-core version to install; the default is the release of this Action, "latest" takes the newest'
     required: false
-    default: '0.8.0'
+    default: '0.8.1'
 outputs:
   status:
     description: 'pass or fail'
