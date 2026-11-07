@@ -94,6 +94,16 @@ class TestProtocol(unittest.TestCase):
         )
         for t in tools.values():
             self.assertEqual(t["inputSchema"]["type"], "object")
+            ann = t["annotations"]
+            self.assertTrue(isinstance(ann.get("title"), str) and ann["title"])
+            for hint in ("readOnlyHint", "destructiveHint", "idempotentHint", "openWorldHint"):
+                self.assertIsInstance(ann.get(hint), bool)
+            self.assertFalse(ann["destructiveHint"])
+            self.assertTrue(ann["idempotentHint"])
+            self.assertFalse(ann["openWorldHint"])
+            for prop in t["inputSchema"]["properties"].values():
+                self.assertIn("type", prop)
+                self.assertTrue(isinstance(prop.get("description"), str) and prop["description"])
         self.assertTrue(tools["scan"]["annotations"]["readOnlyHint"])
         self.assertFalse(tools["learn"]["annotations"]["readOnlyHint"])
 

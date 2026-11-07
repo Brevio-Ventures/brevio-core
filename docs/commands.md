@@ -17,6 +17,7 @@ Every `brevio-core` command and option, generated from the argument definitions 
 | [`brevio-core aeo`](#brevio-core-aeo) | score a folder of built HTML pages, with its robots.txt and llms.txt, against the AEO rubric |
 | [`brevio-core check`](#brevio-core-check) | run the pre-PR flight check (rules, test custody, test imports, conflict markers and complexity) |
 | [`brevio-core brief`](#brevio-core-brief) | print the zero-token rule & trap briefing for the files you are about to edit |
+| [`brevio-core score`](#brevio-core-score) | compute the deterministic Agent Safety Score (0-100, A+ to F), README badge and scorecard |
 | [`brevio-core up`](#brevio-core-up) | show what a team sync would take from this repository, and the waitlist link (uploads nothing) |
 
 ## `brevio-core scan`
@@ -268,6 +269,25 @@ brevio-core brief [options] [files ...]
 | `[files ...]` |  | files to generate briefing for |
 | `--json` |  | output briefing as JSON |
 | `--record ('RULE', 'TRAP', 'FIX')` |  | record a Trap -&gt; Fix episode for the first named file |
+
+## `brevio-core score`
+
+Compute the deterministic Agent Safety Score (0-100, A+ to F), README badge and scorecard.
+
+```
+brevio-core score [options] [paths ...]
+```
+
+| Argument | Default | What it does |
+| --- | --- | --- |
+| `[paths ...]` |  | files or folders to score (default: the current folder) |
+| `--diff [BASE]` |  | score only the lines added against BASE (default origin/main) |
+| `--min SCORE` | `0` | exit 1 when the score is below SCORE (default 0) |
+| `--format {text,markdown,json}` | `text` | output format (default: text) |
+| `--json` |  | output scorecard as JSON |
+| `--badge` |  | print only the Markdown shield badge |
+| `--roast` |  | include the verdict roast line |
+| `--no-upgrade-line` |  | leave out the closing Teams line |
 
 ## `brevio-core up`
 

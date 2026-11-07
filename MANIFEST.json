@@ -1,7 +1,7 @@
 {
  "schema": 1,
- "version": "0.7.0",
- "harness_commit": "a77791e6c4ec2c363a8975e49a2425489d448e3d",
+ "version": "0.8.0",
+ "harness_commit": "ceecb971c39a4f9473f42c90a8fe9e92b879dcee",
  "set": "0.2",
  "files": {
   ".github/ISSUE_TEMPLATE/bug.yml": "tools/core_release/.github/ISSUE_TEMPLATE/bug.yml",
@@ -17,6 +17,7 @@
   "CODE_OF_CONDUCT.md": "tools/core_release/CODE_OF_CONDUCT.md",
   "CONTRIBUTING.md": "tools/core_release/CONTRIBUTING.md",
   "CONTRIBUTORS.md": "tools/core_release/CONTRIBUTORS.md",
+  "Dockerfile": "tools/core_release_agent_tools/Dockerfile",
   "GOVERNANCE.md": "tools/core_release/GOVERNANCE.md",
   "IMPORTED": "tools/core_release/IMPORTED",
   "LICENSE": "tools/core_release/LICENSE",
@@ -215,6 +216,7 @@
   "scripts/release_assets.py": "tools/core_release/scripts/release_assets.py",
   "server.json": "tools/core_release_agent_tools/server.json",
   "skills/brevio-core/SKILL.md": "brevio/pipeline/gates/agent_skill.py",
+  "smithery.yaml": "tools/core_release_agent_tools/smithery.yaml",
   "templates/agent-safe-starter/.github/workflows/brevio-core.yml": "tools/core_release/templates/agent-safe-starter/.github/workflows/brevio-core.yml",
   "templates/agent-safe-starter/AGENTS.md": "tools/core_release/templates/agent-safe-starter/AGENTS.md",
   "templates/agent-safe-starter/README.md": "tools/core_release/templates/agent-safe-starter/README.md",

@@ -580,31 +580,30 @@ def agent_tools() -> tuple[dict[str, Callable[[list[str]], int]], dict[str, str]
 
 INIT_MODULE = "core_init"       # the 0.4 set's ``init`` and ``init --undo`` (ROADMAP E22); a build without it has no ``init``
 UP_MODULE = "core_up"           # the 0.6 set's ``up`` preview and upgrade line (ROADMAP E37); a build without it has neither
+AEO_MODULE = "core_aeo"         # the 0.6 set's ``aeo``, the AEO rubric on local pages (ADOPTION.md 0.29); absent before it
+CHECK_MODULE = "core_gates"     # the 0.6 set's ``check`` pre-PR flight check
+BRIEF_MODULE = "core_memory"    # the 0.6 set's ``brief`` surface rules & trap recall
+SCORE_MODULE = "core_score"     # the 0.6 set's ``score`` Agent Safety Score & README badge
+
+
+def _opt_cmd(cmd: str, pkg: str, mod_name: str) -> tuple[dict[str, Callable[[list[str]], int]], dict[str, str]]:
+    mod = set_module(pkg, mod_name)
+    return ({cmd: mod.main}, {cmd: mod.HELP}) if mod is not None else ({}, {})
 
 
 def init_command() -> tuple[dict[str, Callable[[list[str]], int]], dict[str, str]]:
     """``({"init": main}, {"init": help})`` in a build that ships ``init``, else two empty tables."""
-    name = f"{__name__.split('.')[0]}.pipeline.{INIT_MODULE}"
-    try:
-        mod = importlib.import_module(name)     # built at run time: absent before the 0.4 set
-    except ModuleNotFoundError as err:
-        if err.name != name:
-            raise
-        return {}, {}
-    return {"init": mod.main}, {"init": mod.HELP}
+    return _opt_cmd("init", "pipeline", INIT_MODULE)
 
 
 def up_tools() -> Any:
-    """The ``up`` module of the 0.6 set (the preview and the upgrade line), or ``None`` in a build without it.
-
-    It loads only when the command line is read, so its imports reach no other command."""
+    """The ``up`` module of the 0.6 set (the preview and the upgrade line), or ``None`` in a build without it."""
     return set_module("pipeline", UP_MODULE)
 
 
 def up_command() -> tuple[dict[str, Callable[[list[str]], int]], dict[str, str]]:
     """``({"up": main}, {"up": help})`` in a build that ships ``up``, else two empty tables."""
-    mod = up_tools()
-    return ({"up": mod.main}, {"up": mod.HELP}) if mod is not None else ({}, {})
+    return _opt_cmd("up", "pipeline", UP_MODULE)
 
 
 def upgrade_line(ref: str, wanted: bool = True) -> str:
@@ -613,27 +612,20 @@ def upgrade_line(ref: str, wanted: bool = True) -> str:
     return up.upgrade_line(ref) if up is not None else ""
 
 
-AEO_MODULE = "core_aeo"         # the 0.6 set's ``aeo``, the AEO rubric on local pages (ADOPTION.md 0.29); absent before it
-CHECK_MODULE = "core_gates"     # the 0.6 set's ``check`` pre-PR flight check
-BRIEF_MODULE = "core_memory"    # the 0.6 set's ``brief`` surface rules & trap recall
-
-
 def aeo_command() -> tuple[dict[str, Callable[[list[str]], int]], dict[str, str]]:
-    """``({"aeo": main}, {"aeo": help})`` in a build that ships ``aeo``, else two empty tables."""
-    mod = set_module("pipeline", AEO_MODULE)
-    return ({"aeo": mod.main}, {"aeo": mod.HELP}) if mod is not None else ({}, {})
+    return _opt_cmd("aeo", "pipeline", AEO_MODULE)
 
 
 def check_command() -> tuple[dict[str, Callable[[list[str]], int]], dict[str, str]]:
-    """``({"check": main}, {"check": help})`` in a build that ships ``check``, else two empty tables."""
-    mod = set_module("pipeline.gates", CHECK_MODULE)
-    return ({"check": mod.main}, {"check": mod.HELP}) if mod is not None else ({}, {})
+    return _opt_cmd("check", "pipeline.gates", CHECK_MODULE)
 
 
 def brief_command() -> tuple[dict[str, Callable[[list[str]], int]], dict[str, str]]:
-    """``({"brief": main}, {"brief": help})`` in a build that ships ``brief``, else two empty tables."""
-    mod = set_module("pipeline", BRIEF_MODULE)
-    return ({"brief": mod.main}, {"brief": mod.HELP}) if mod is not None else ({}, {})
+    return _opt_cmd("brief", "pipeline", BRIEF_MODULE)
+
+
+def score_command() -> tuple[dict[str, Callable[[list[str]], int]], dict[str, str]]:
+    return _opt_cmd("score", "pipeline", SCORE_MODULE)
 
 
 def _add_baseline_arguments(sub: Any, sc: argparse.ArgumentParser) -> None:
@@ -727,9 +719,9 @@ def _dispatch(args: argparse.Namespace) -> int:
 
 def line_commands() -> tuple[dict[str, Callable[[list[str]], int]], dict[str, str]]:
     """``(commands, help)`` of every command that reads the rest of its line itself, in the order ``--help`` lists them:
-    the agent tools, ``init``, ``aeo``, ``check``, ``brief`` and ``up``, each where the build ships it."""
+    the agent tools, ``init``, ``aeo``, ``check``, ``brief``, ``score`` and ``up``, each where the build ships it."""
     tools, tool_help = agent_tools()
-    for more, more_help in (init_command(), aeo_command(), check_command(), brief_command(), up_command()):
+    for more, more_help in (init_command(), aeo_command(), check_command(), brief_command(), score_command(), up_command()):
         tools, tool_help = {**tools, **more}, {**tool_help, **more_help}
     return tools, tool_help
 
@@ -744,17 +736,16 @@ def _interactive_entry(tools: dict[str, Callable[[list[str]], int]]) -> int:
           "  [1] Scan uncommitted changes (scan --diff HEAD) [default]\n"
           "  [2] Run Pre-PR Flight Check (check)\n"
           "  [3] Compile last fix into a guard (learn)\n"
-          "  [4] Run interactive setup wizard (init --wizard)")
+          "  [4] Run interactive setup wizard (init --wizard)\n"
+          "  [5] Compute Agent Safety Score & README badge (score)")
     try:
-        choice = input("Choose [1/2/3/4] (Enter for 1): ").strip()
+        choice = input("Choose [1/2/3/4/5] (Enter for 1): ").strip()
     except EOFError:
         choice = "1"
-    if choice == "2" and "check" in tools:
-        return tools["check"]([])
-    if choice == "3" and "learn" in tools:
-        return tools["learn"]([])
-    if choice == "4" and "init" in tools:
-        return tools["init"](["--wizard"])
+    dispatch = {"2": ["check"], "3": ["learn"], "4": ["init", "--wizard"], "5": ["score"]}
+    target = dispatch.get(choice)
+    if target and target[0] in tools:
+        return tools[target[0]](target[1:])
     return main(["scan", "--diff", "HEAD"] if has_head() else ["scan"])
 
 

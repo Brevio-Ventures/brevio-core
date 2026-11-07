@@ -39,7 +39,7 @@ inputs:
   package-version:
     description: 'brevio-core version to install; the default is the release of this Action, "latest" takes the newest'
     required: false
-    default: '0.7.0'
+    default: '0.8.0'
 outputs:
   status:
     description: 'pass or fail'
@@ -176,7 +176,36 @@ runs:
         write(env["GITHUB_STEP_SUMMARY"], report + "\n", "a")
 
         footer = env.get("FOOTER", "auto")
-        if footer == "true" or (footer == "auto" and env.get("PRIVATE") != "true"):
+        show_viral = footer == "true" or (footer == "auto" and env.get("PRIVATE") != "true")
+        if show_viral and env.get("NOTHING") != "true":
+            warnings = sum(1 for r in results if r.get("level") == "warning")
+            errors = len(results) - warnings
+            score = max(0, 100 - 10 * errors - 3 * warnings)
+            if score >= 100:
+                grade, color = "A+", "brightgreen"
+            elif score >= 90:
+                grade, color = "A", "brightgreen"
+            elif score >= 80:
+                grade, color = "B", "green"
+            elif score >= 70:
+                grade, color = "C", "yellow"
+            elif score >= 60:
+                grade, color = "D", "orange"
+            else:
+                grade, color = "F", "red"
+            grade_enc = grade.replace("+", "%2B")
+            badge = f"[![Agent Safety: {grade} ({score}/100)](https://img.shields.io/badge/agent%20safety-{grade_enc}%20({score}%2F100)-{color})](https://brevio.pro/tools/rules-encyclopedia)"
+            rids = sorted({str(r.get("ruleId", "")) for r in results if str(r.get("ruleId", "")).startswith("R")})
+            links = [f"[Test {rid} in Playground](https://brevio.pro/tools/agent-guard-playground?rule={rid})" for rid in rids]
+            links.append("[Rules Encyclopedia](https://brevio.pro/tools/rules-encyclopedia)")
+            scorecard = (
+                f"\n#### Agent Safety Scorecard: **{score}/100 ({grade})** {badge}\n\n"
+                + " · ".join(links) + "\n\n"
+                + f"<details><summary>Copy README badge Markdown</summary>\n\n```markdown\n{badge}\n```\n</details>\n"
+            )
+            write(env["GITHUB_STEP_SUMMARY"], scorecard, "a")
+
+        if show_viral:
             repo = f"{env['GITHUB_SERVER_URL']}/Brevio-Ventures/brevio-core"
             tail = f"\n\n<sub>checked by [brevio-core]({repo})</sub>\n"
         else:

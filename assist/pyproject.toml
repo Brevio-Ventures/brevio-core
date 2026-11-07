@@ -4,13 +4,13 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "brevio-core-assist"
-version = "0.7.0"
+version = "0.8.0"
 description = "Optional plugin for brevio-core: explain a finding or suggest a fix with your own model endpoint and key. Off until configured; it asks before it sends."
 readme = "README.md"
 requires-python = ">=3.10"
 license = "Apache-2.0"
 authors = [{name = "Brevio"}]
-dependencies = ["brevio-core==0.7.0"]
+dependencies = ["brevio-core==0.8.0"]
 classifiers = [
     "Development Status :: 3 - Alpha",
     "Environment :: Console",
