@@ -563,6 +563,142 @@ class TestCoreMemory(unittest.TestCase):
                 self.assertTrue(res_disabled["ok"])
                 self.assertEqual(res_disabled["findings"], [])
 
+    def test_tautological_assert_identifier_self_comparison(self):
+        lines = {
+            "tests/test_a.py": [
+                (1, "def test_foo():"),
+                (2, "    assert val == val"),
+                (3, "    assert x == y"),
+            ],
+            "tests/test_b.test.ts": [
+                (1, "it('works', () => {"),
+                (2, "    expect(foo).toBe(foo);"),
+                (3, "    expect(bar).toStrictEqual(bar);"),
+                (4, "    expect(baz).toEqual(other);"),
+                (5, "});"),
+            ],
+        }
+        findings = core_gates.check_test_tampering(lines)
+        self.assertEqual(len(findings), 3)
+        self.assertIn("tests/test_a.py:2: [R6.5] Tautological test assertion", findings[0])
+        self.assertIn("tests/test_b.test.ts:2: [R6.5] Tautological test assertion", findings[1])
+        self.assertIn("tests/test_b.test.ts:3: [R6.5] Tautological test assertion", findings[2])
+
+    def test_check_empty_test_blocks(self):
+        with tempfile.TemporaryDirectory() as d:
+            py_empty = (
+                "import unittest\n"
+                "class DummyTest(unittest.TestCase):\n"
+                "    def test_empty(self):\n"
+                "        pass\n"
+                "    def test_stub(self):\n"
+                "        ...\n"
+                "    def test_ok(self):\n"
+                "        assert 1 == 2\n"
+            )
+            write_file(d, "tests/test_empty.py", py_empty)
+            lines = {
+                "tests/test_empty.py": [(4, "        pass"), (6, "        ...")],
+                "tests/test_js.test.ts": [
+                    (1, "it('empty test', () => {});"),
+                    (2, "it('valid test', () => { expect(1).toBe(2); });"),
+                ],
+            }
+            findings = core_gates.check_empty_test_blocks(lines, root=d)
+            self.assertEqual(len(findings), 3)
+            self.assertTrue(all("[R6.1]" in f for f in findings))
+            self.assertTrue(any("test_empty" in f for f in findings))
+            self.assertTrue(any("test_stub" in f for f in findings))
+            self.assertTrue(any("test_js.test.ts:1" in f for f in findings))
+
+    def test_check_ai_slop_markers(self):
+        lines = {
+            "src/model.py": [
+                (1, "# As an AI language model, I recommend this pattern"),
+                (2, "def solve():"),
+                (3, "    # certainly! here is the function implementation"),
+                (4, "    return 42"),
+                (5, "# let me know if you'd like me to explain further"),
+            ],
+            "src/clean.py": [
+                (1, "def add(a, b):"),
+                (2, "    return a + b"),
+            ],
+        }
+        findings = core_gates.check_ai_slop_markers(lines)
+        self.assertEqual(len(findings), 3)
+        self.assertTrue(all("[R19.3]" in f for f in findings))
+        self.assertIn("src/model.py:1", findings[0])
+        self.assertIn("src/model.py:3", findings[1])
+        self.assertIn("src/model.py:5", findings[2])
+
+    def test_check_test_imports_recognizes_new_assertions(self):
+        with tempfile.TemporaryDirectory() as d:
+            test_pytest_good = (
+                "import pytest\n"
+                "from src import app\n"
+                "def test_err():\n"
+                "    with pytest.raises(ValueError):\n"
+                "        app.fail()\n"
+            )
+            write_file(d, "tests/test_pytest_good.py", test_pytest_good)
+            self.assertEqual(
+                core_gates.check_test_imports({"tests/test_pytest_good.py": [(1, "")]}, root=d),
+                [],
+            )
+
+            test_pytest_bad = (
+                "import pytest\n"
+                "def test_err():\n"
+                "    with pytest.raises(ValueError):\n"
+                "        pass\n"
+            )
+            write_file(d, "tests/test_pytest_bad.py", test_pytest_bad)
+            findings = core_gates.check_test_imports({"tests/test_pytest_bad.py": [(1, "")]}, root=d)
+            self.assertEqual(len(findings), 1)
+            self.assertIn("[R6.1]", findings[0])
+
+            test_js_bad = (
+                "import assert from 'assert';\n"
+                "test('strict equal', () => {\n"
+                "    assert.strictEqual(1, 1);\n"
+                "});\n"
+            )
+            write_file(d, "tests/test_js_bad.test.js", test_js_bad)
+            findings_js = core_gates.check_test_imports({"tests/test_js_bad.test.js": [(1, "")]}, root=d)
+            self.assertEqual(len(findings_js), 1)
+            self.assertIn("[R6.1]", findings_js[0])
+
+    def test_run_check_with_baseline_triage(self):
+        from brevio.pipeline import core_baseline, core_cli
+        with tempfile.TemporaryDirectory() as d:
+            cwd = os.getcwd()
+            try:
+                os.chdir(d)
+                os.makedirs(".brevio", exist_ok=True)
+                os.makedirs("src", exist_ok=True)
+                write_file(d, "src/api.ts", "const x = 1 as any;\n")
+                finding = "src/api.ts:1: [R9.1] Untyped escape hatch `as any` or `z.any()` in production source"
+                cnts = core_baseline.counts([finding], core_cli.finding_fields, core_cli.line_reader())
+                with open(".brevio/baseline.json", "w") as fh:
+                    fh.write(core_baseline.render(cnts))
+
+                lines = {"src/api.ts": [(1, "const x = 1 as any;")]}
+                res = core_gates.run_check(root=d, base="HEAD", lines=lines)
+                self.assertTrue(res["passed"])
+                self.assertEqual(res["findings"], [])
+
+                # Structural checks (conflict markers) remain non-suppressible
+                lines_conflict = {
+                    "src/api.ts": [(1, "const x = 1 as any;")],
+                    "src/other.py": [(1, "<<<<<<< HEAD"), (2, "======="), (3, ">>>>>>> branch")],
+                }
+                res_conflict = core_gates.run_check(root=d, base="HEAD", lines=lines_conflict)
+                self.assertFalse(res_conflict["passed"])
+                self.assertTrue(any("[R5.1]" in f for f in res_conflict["findings"]))
+            finally:
+                os.chdir(cwd)
+
 
 if __name__ == "__main__":
     unittest.main()

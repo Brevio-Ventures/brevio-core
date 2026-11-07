@@ -24,6 +24,7 @@ BARE_EXCEPT = "try:\n    run()\nexcept:\n    pass\n"
 SAMPLES = {
     "R9.2": ("src/a.ts", "  /* @ts-ignore */ const n: number = 'x';"),
     "R5.4": ("a.py", "    except :"),
+    "R10.1": ("a.py", "resp = requests.get(url)"),
     "R18.2": ("src/Link.tsx", '  <a href="/docs" target="_blank">Docs</a>'),
 }
 _RUN = "import sys; sys.path.insert(0, sys.argv[1]); from brevio.pipeline import core_cli; raise SystemExit(core_cli.main(sys.argv[2:]))"
@@ -130,6 +131,13 @@ class TestFixCommand(unittest.TestCase):
             res = run_cli(d, "scan", "--fix")
             self.assertEqual(res.returncode, 0, res.stderr)
             self.assertEqual(read(d, "src/Link.tsx"), '<a href="/docs" target="_blank" rel="noopener noreferrer">Docs</a>\n')
+
+    def test_r101_fixer_adds_timeout_when_missing(self):
+        with tempfile.TemporaryDirectory() as d:
+            write(d, "client.py", "resp = requests.get(url)\n")
+            res = run_cli(d, "scan", "--fix")
+            self.assertEqual(res.returncode, 0, res.stderr)
+            self.assertEqual(read(d, "client.py"), "resp = requests.get(url, timeout=30)\n")
 
 
 class TestFixTool(unittest.TestCase):

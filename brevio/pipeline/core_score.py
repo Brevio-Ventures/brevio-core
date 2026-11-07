@@ -67,10 +67,11 @@ def build_roast(score: int, rule_counts: dict[str, int]) -> str:
 
 
 def _build_receipt_url(meta: dict[str, Any], score: int) -> str:
+    interceptions = int(meta.get("errors", 0) + meta.get("warnings", 0))
     try:
-        return dopamine_ledger.generate_receipt_url(meta)  # type: ignore[arg-type,call-arg]
+        return dopamine_ledger.generate_receipt_url(interceptions, None, 0, aeo_score=score)  # type: ignore[arg-type]
     except TypeError:
-        return dopamine_ledger.generate_receipt_url(meta, None, 0, aeo_score=score)  # type: ignore[arg-type]
+        return dopamine_ledger.generate_receipt_url(interceptions, aeo_score=score)  # type: ignore[call-arg]
 
 
 def _triggered_rules(shown: list[str]) -> tuple[dict[str, int], list[dict[str, Any]]]:
@@ -148,7 +149,7 @@ def compute_scorecard(paths: list[str] | None = None, diff: str | None = None, r
     }
 
 
-def render_text(card: dict[str, Any], footer: str = "") -> str:
+def render_text(card: dict[str, Any], footer: str = "", roast: bool = False) -> str:
     """Format the Agent Safety Scorecard as plain text."""
     lines = [
         f"brevio-core score: {card['score']}/100 (Grade: {card['grade']})",
@@ -157,6 +158,10 @@ def render_text(card: dict[str, Any], footer: str = "") -> str:
     ]
     for item in card["triggered_rules"]:
         lines.append(f"  [{item['rule']}] ({item['count']}x) {item['title']} -> {item['playground_url']}")
+    if roast and card.get("triggered_rules"):
+        lines.append("Engineering Roast:")
+        for r in card["triggered_rules"]:
+            lines.append(f"  * {r['rule']}: AI wrote code violating {r['title']}. Fix this before merge.")
     lines += [
         f"Rules Encyclopedia: {card['rules_encyclopedia_url']}",
         f"Verified Receipt: {card['receipt_url']}",
@@ -170,7 +175,7 @@ def render_text(card: dict[str, Any], footer: str = "") -> str:
     return "\n".join(lines) + "\n"
 
 
-def render_markdown(card: dict[str, Any], footer: str = "") -> str:
+def render_markdown(card: dict[str, Any], footer: str = "", roast: bool = False) -> str:
     """Format the Agent Safety Scorecard as Markdown."""
     lines = [
         f"### Brevio Agent Safety Score: {card['score']}/100 (Grade `{card['grade']}`)",
@@ -190,6 +195,10 @@ def render_markdown(card: dict[str, Any], footer: str = "") -> str:
                 f"| `{item['rule']}` | {item['count']} | {item['title']} | "
                 f"[Test {item['rule']} in Playground]({item['playground_url']}) |"
             )
+    if roast and card.get("triggered_rules"):
+        lines += ["", "#### Engineering Roast", ""]
+        for r in card["triggered_rules"]:
+            lines.append(f"- **{r['rule']}**: AI wrote code violating {r['title']}. Fix this before merge.")
     lines += [
         "",
         f"[Rules Encyclopedia]({card['rules_encyclopedia_url']}) · [Verified Receipt]({card['receipt_url']})",
@@ -214,6 +223,7 @@ def parser(prog: str = "brevio-core score") -> argparse.ArgumentParser:
     ap.add_argument("--min", dest="min_score", type=int, default=0, metavar="SCORE",
                     help="exit 1 when the score is below SCORE (default 0)")
     ap.add_argument("--format", choices=FORMATS, default="text", help="output format (default: text)")
+    ap.add_argument("--markdown", action="store_true", help="alias for --format markdown")
     ap.add_argument("--json", action="store_true", help="output scorecard as JSON")
     ap.add_argument("--badge", action="store_true", help="print only the Markdown shield badge")
     ap.add_argument("--roast", action="store_true", help="include the verdict roast line")
@@ -232,12 +242,12 @@ def main(argv: list[str] | None = None, prog: str = "brevio-core score") -> int:
     if args.badge:
         sys.stdout.write(card["badge_markdown"] + "\n")
         return rc
-    fmt = "json" if args.json else args.format
+    fmt = "markdown" if args.markdown else ("json" if args.json else args.format)
     if fmt == "json":
         print(json.dumps(card, indent=2))
         return rc
     footer = core_cli.upgrade_line("score", not args.no_upgrade_line)
-    out = render_markdown(card, footer) if fmt == "markdown" else render_text(card, footer)
+    out = render_markdown(card, footer, roast=args.roast) if fmt == "markdown" else render_text(card, footer, roast=args.roast)
     sys.stdout.write(out)
     return rc
 

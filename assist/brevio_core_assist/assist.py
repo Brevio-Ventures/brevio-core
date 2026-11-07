@@ -37,6 +37,7 @@ EXIT_OK, EXIT_FAILED, EXIT_USAGE, EXIT_OFF = 0, 1, 2, 3
 FORMATS = ("chat", "messages")
 FINDING = re.compile(r"^\s*(?P<path>.+?):(?P<line>\d+): \[(?P<rule>R\d+\.\d+)\]")
 MAX_TOKENS = 400
+HEAL_MAX_TOKENS = 1500
 MAX_LINE = 2000          # a minified file's one line is cut here, so a finding never sends a whole bundle
 TIMEOUT_S = 60
 SYSTEM = ("You review one line of code against one rule of a static checker. Answer briefly, about that line only, "
@@ -46,6 +47,7 @@ ASK = {
     "suggest-fix": "Suggest a corrected version of this line that satisfies the rule and keeps what the line does. "
                    "Give the corrected line first, then one sentence on why.",
     "verify-fix": "Return only the corrected single line of code that fixes this rule violation while preserving behavior (no markdown fences, no commentary).",
+    "heal": "Apply surgical SEARCH/REPLACE edits to resolve the following Brevio gate findings and code rules without running full test suites.",
 }
 
 
@@ -71,8 +73,34 @@ def config(env: Mapping[str, str], args: argparse.Namespace) -> Config:
     """The settings: a flag wins over its environment variable."""
     def pick(flag: str | None, name: str) -> str:
         return (flag if flag is not None else env.get(name, "")).strip()
-    return Config(url=pick(args.url, "BREVIO_ASSIST_URL"), fmt=pick(args.format, "BREVIO_ASSIST_FORMAT").lower(),
-                  model=pick(args.model, "BREVIO_ASSIST_MODEL"), key_env=pick(args.key_env, "BREVIO_ASSIST_KEY_ENV"),
+
+    url = pick(args.url, "BREVIO_ASSIST_URL")
+    fmt = pick(args.format, "BREVIO_ASSIST_FORMAT").lower()
+    local_prefix = "http://"
+    ollama_port = 11434
+    if getattr(args, "local_ollama", False):
+        if not url:
+            url = f"{local_prefix}localhost:{ollama_port}/v1/chat/completions"
+        if not fmt:
+            fmt = "chat"
+    elif getattr(args, "local_vllm", False):
+        if not url:
+            url = local_prefix + "localhost:8000/v1/chat/completions"
+        if not fmt:
+            fmt = "chat"
+
+    model = pick(args.model, "BREVIO_ASSIST_MODEL")
+    if not model and (getattr(args, "local_ollama", False) or getattr(args, "local_vllm", False)):
+        model = "local-model"
+
+    key_env = pick(args.key_env, "BREVIO_ASSIST_KEY_ENV")
+    if not key_env and "BREVIO_ASSIST_API_KEY" in env:
+        key_env = "BREVIO_ASSIST_API_KEY"
+    elif not key_env and (getattr(args, "local_ollama", False) or getattr(args, "local_vllm", False)):
+        key_env = "BREVIO_ASSIST_KEY_ENV"
+
+    return Config(url=url, fmt=fmt,
+                  model=model, key_env=key_env,
                   header=env.get("BREVIO_ASSIST_HEADER", "").strip())
 
 
@@ -239,22 +267,35 @@ def verify_replacement(finding: Finding, reply_text: str) -> tuple[str, bool]:
     return (candidate, not any(f"[{finding.rule}]" in f for f in hits))
 
 
+def _add_common_arguments(p: argparse.ArgumentParser) -> None:
+    p.add_argument("--root", default=".", help="the folder the finding's path is relative to (default: here)")
+    p.add_argument("--diff", default=None, help="diff base commit or branch for diff-based heal")
+    p.add_argument("--yes", action="store_true", help="send without asking (the request is still printed)")
+    p.add_argument("--dry-run", action="store_true", help="print the request and send nothing")
+    p.add_argument("--url", help="the endpoint URL (default: BREVIO_ASSIST_URL)")
+    p.add_argument("--format", choices=FORMATS, help="the request shape (default: BREVIO_ASSIST_FORMAT)")
+    p.add_argument("--model", help="the model name (default: BREVIO_ASSIST_MODEL)")
+    p.add_argument("--key-env", help="the variable holding your key (default: BREVIO_ASSIST_KEY_ENV)")
+    p.add_argument("--local-ollama", action="store_true", help="use local Ollama endpoint (localhost port 11434)")
+    p.add_argument("--local-vllm", action="store_true", help="use local vLLM endpoint (localhost port 8000)")
+
+
 def _parser() -> argparse.ArgumentParser:
     ap = argparse.ArgumentParser(prog="brevio-core-assist", description="Explain a brevio-core finding, or suggest a "
                                  "fix, with your own endpoint and key. Off until configured; asks before it sends.")
-    sub = ap.add_subparsers(dest="command", required=True)
+    ap.add_argument("--heal", action="store_true", help="run self-heal loop and request repair suggestions")
+    _add_common_arguments(ap)
+    sub = ap.add_subparsers(dest="command")
     for name, text in (("explain", "why the line breaks the rule"),
                        ("suggest-fix", "a corrected line"),
-                       ("verify-fix", "a corrected line verified against the rule scanner")):
+                       ("verify-fix", "a corrected line verified against the rule scanner"),
+                       ("heal", "autonomous self-heal repair suggestions")):
         p = sub.add_parser(name, help=text)
-        p.add_argument("finding", help="one finding line as brevio-core scan prints it: 'path:line: [Rn.n] message'")
-        p.add_argument("--root", default=".", help="the folder the finding's path is relative to (default: here)")
-        p.add_argument("--yes", action="store_true", help="send without asking (the request is still printed)")
-        p.add_argument("--dry-run", action="store_true", help="print the request and send nothing")
-        p.add_argument("--url", help="the endpoint URL (default: BREVIO_ASSIST_URL)")
-        p.add_argument("--format", choices=FORMATS, help="the request shape (default: BREVIO_ASSIST_FORMAT)")
-        p.add_argument("--model", help="the model name (default: BREVIO_ASSIST_MODEL)")
-        p.add_argument("--key-env", help="the variable holding your key (default: BREVIO_ASSIST_KEY_ENV)")
+        if name != "heal":
+            p.add_argument("finding", help="one finding line as brevio-core scan prints it: 'path:line: [Rn.n] message'")
+        else:
+            p.add_argument("finding", nargs="?", default="", help="optional finding or target path")
+        _add_common_arguments(p)
     return ap
 
 
@@ -262,17 +303,43 @@ def main(argv: list[str] | None = None, env: Mapping[str, str] | None = None,
          ask: Callable[[str], str] | None = None) -> int:
     args = _parser().parse_args(argv)
     env = os.environ if env is None else env
+    is_heal = bool(getattr(args, "heal", False) or args.command == "heal")
+    if not args.command and not is_heal:
+        _parser().print_help(file=sys.stderr)
+        return EXIT_USAGE
+
+    if (getattr(args, "local_ollama", False) or getattr(args, "local_vllm", False)):
+        if "BREVIO_ASSIST_KEY_ENV" not in env and "BREVIO_ASSIST_API_KEY" not in env:
+            env = dict(env, BREVIO_ASSIST_KEY_ENV="LOCAL_KEY", LOCAL_KEY="local")
+
     cfg = config(env, args)
     off = problems(cfg, env)
     if off:
         print("brevio-core-assist is off:\n  " + "\n  ".join(off), file=sys.stderr)
         return EXIT_OFF
-    try:
-        finding = parse_finding(args.finding)
-        body = request_body(cfg, args.command, rule_text(finding.rule), source_line(args.root, finding))
-    except ValueError as exc:
-        print(f"brevio-core-assist: {exc}", file=sys.stderr)
-        return EXIT_USAGE
+
+    if is_heal:
+        from brevio.pipeline import core_heal
+        report = core_heal.run_heal(root=args.root, diff_base=getattr(args, "diff", None))
+        if report.get("ok"):
+            print("brevio-core-assist heal: workspace is clean, 0 remaining findings.")
+            return EXIT_OK
+        heal_packet = report.get("heal_packet", "")
+        text = f"{ASK['heal']}\n\n{heal_packet}"
+        if cfg.fmt == "messages":
+            body = {"model": cfg.model, "max_tokens": HEAL_MAX_TOKENS, "system": SYSTEM,
+                    "messages": [{"role": "user", "content": text}]}
+        else:
+            body = {"model": cfg.model, "max_tokens": HEAL_MAX_TOKENS,
+                    "messages": [{"role": "system", "content": SYSTEM}, {"role": "user", "content": text}]}
+    else:
+        try:
+            finding = parse_finding(args.finding)
+            body = request_body(cfg, args.command, rule_text(finding.rule), source_line(args.root, finding))
+        except ValueError as exc:
+            print(f"brevio-core-assist: {exc}", file=sys.stderr)
+            return EXIT_USAGE
+
     print(preview(cfg, body))
     if args.dry_run:
         return EXIT_OK
@@ -286,7 +353,8 @@ def main(argv: list[str] | None = None, env: Mapping[str, str] | None = None,
     except AssistError as exc:
         print(f"brevio-core-assist: {exc}", file=sys.stderr)
         return EXIT_FAILED
-    if args.command == "verify-fix":
+
+    if not is_heal and args.command == "verify-fix":
         candidate, ok = verify_replacement(finding, reply)
         print(candidate)
         if ok:
@@ -294,6 +362,7 @@ def main(argv: list[str] | None = None, env: Mapping[str, str] | None = None,
             return EXIT_OK
         print(f"unverified: still triggers [{finding.rule}]", file=sys.stderr)
         return EXIT_FAILED
+
     print(reply)
     return EXIT_OK
 

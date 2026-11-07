@@ -244,6 +244,7 @@ _TARGET_BLANK_A_RX = re.compile(r"""<a\b[^>]*\btarget\s*=\s*["']_blank["'][^>]*>
 _REL_NOOPENER_RX = re.compile(r"""\brel\s*=\s*["'][^"']*\bnoopener\b""", re.I)
 _UNBOUNDED_QUERY_RX = re.compile(r"\.(?:findMany|select)\s*\(\s*\{(?![^}]*take\s*:)(?![^}]*limit\s*:)", re.I)
 _AS_ANY_RX = re.compile(r"\bas\s+any(?![\w$])|\bz\.any\s*\(")
+_ANY_RX = _AS_ANY_RX
 _TS_IGNORE_RX = re.compile(r"@ts-ignore\b")
 _EMPTY_CATCH_RX = re.compile(r"\bcatch\s*(?:\([^)]*\))?\s*\{\s*\}")
 _BARE_EXCEPT_RX = re.compile(r"^\s*\+?\s*except\s*:")
@@ -262,6 +263,19 @@ _STOP_ONLY_RX = re.compile(r"onClick\s*=\s*\{\s*\(?\s*(\w+)\s*\)?\s*=>\s*\1\.sto
 # A TypeScript declaration file holds types only, no code that runs, so no code rule can be right there: its R2.8 hits
 # were prose in doc comments (E35 precision run, 2026-11-06).
 _DECLARATION_RX = re.compile(r"\.d\.[cm]?ts$", re.I)
+
+_STRING_OR_COMMENT_RX = re.compile(
+    r"""(?P<str>"(?:[^"\\]|\\.)*"|'(?:[^'\\]|\\.)*'|`(?:[^`\\]|\\.)*`)|(?P<comment>//.*|/\*.*?\*/|#.*)"""
+)
+
+
+def _mask_strings_and_trailing_comments(line: str) -> str:
+    """Mask string literals and strip trailing comments so regexes match only real code expressions."""
+    def _repl(m: re.Match[str]) -> str:
+        if m.group("str") is not None:
+            return '""'
+        return ""
+    return _STRING_OR_COMMENT_RX.sub(_repl, line)
 
 
 def _entropy(s: str) -> float:
@@ -296,7 +310,8 @@ def _hardcoded_secret(line: str, before: str) -> bool:
 
 def _unsafe_eval(rel_path: str, line: str, in_test: bool) -> bool:
     """True when ``line`` runs eval or Function outside test fixture assets and static literal eval probes."""
-    if not _EVAL_RX.search(line) or _TEST_ASSET_RX.search(rel_path):
+    masked = _mask_strings_and_trailing_comments(line)
+    if not _EVAL_RX.search(masked) or _TEST_ASSET_RX.search(rel_path):
         return False
     if in_test and _STATIC_EVAL_RX.search(line) and not _EVAL_RX.search(_STATIC_EVAL_RX.sub("", line)):
         return False
@@ -326,7 +341,8 @@ def _check_python_patterns(rel_path: str, lno: int, line: str, in_test: bool, fi
 
 def _check_script_patterns(rel_path: str, lno: int, line: str, in_test: bool, findings: list[str]) -> None:
     """The rules for a JavaScript or TypeScript code line."""
-    if _AS_ANY_RX.search(line) and not in_test:
+    masked = _mask_strings_and_trailing_comments(line)
+    if _ANY_RX.search(masked) and not in_test:
         findings.append(f"{rel_path}:{lno}: [R9.1] Untyped escape hatch `as any` or `z.any()` in production source")
     if _EMPTY_CATCH_RX.search(line):
         findings.append(f"{rel_path}:{lno}: [R5.4] Empty catch block detected; handle or log the error")
@@ -386,14 +402,70 @@ def declaration(rel_path: str) -> bool:
     return bool(_DECLARATION_RX.search(rel_path))
 
 
+_UNCLOSED_CONSTRUCTS = (
+    (re.compile(r"<img\b", re.I), ">"),
+    (re.compile(r"<div\b", re.I), ">"),
+    (re.compile(r"dangerouslySetInnerHTML\s*="), "}}"),
+    (re.compile(r"\.(?:execute|\$queryRawUnsafe|\$executeRawUnsafe)\s*\(", re.I), ")"),
+    (re.compile(r"\brequests\.(?:get|post|put|delete|patch|head)\s*\(", re.I), ")"),
+)
+_FINDING_KEY_RX = re.compile(r":(\d+):\s*\[(R\d+\.\d+)\]")
+
+
+def _dedup_findings(findings: list[str]) -> list[str]:
+    seen: set[tuple[int, str] | str] = set()
+    deduped: list[str] = []
+    for f in findings:
+        m = _FINDING_KEY_RX.search(f)
+        if m:
+            key: tuple[int, str] | str = (int(m.group(1)), m.group(2))
+        else:
+            key = f
+        if key in seen:
+            continue
+        seen.add(key)
+        deduped.append(f)
+    return deduped
+
+
 def scan_lines(rel_path: str, numbered: list[tuple[int, str]]) -> list[str]:
     """Scan ``(line_no, text)`` pairs of one file, keeping the real line numbers (a diff's added lines).
 
     A TypeScript declaration file (``.d.ts``, ``.d.mts``, ``.d.cts``) gives no finding, so every scan mode skips it."""
-    findings: list[str] = []
+    raw_findings: list[str] = []
     if declaration(rel_path):
-        return findings
+        return raw_findings
+
+    ext = os.path.splitext(rel_path)[1].lower()
+    in_test = "test" in rel_path.lower()
+    is_js = ext in (".ts", ".tsx", ".js", ".jsx")
+
+    # R17.2: Bar 'server-only' imports from client components ('use client')
+    if is_js and not in_test:
+        has_use_client = any(re.search(r"['\"]use client['\"]", text) for _, text in numbered)
+        if has_use_client:
+            for lno, text in numbered:
+                if re.search(r"['\"]server-only['\"]", text):
+                    raw_findings.append(f"{rel_path}:{lno}: [R17.2] {PR_RULES_122['R17.2']}")
+
     for i, (lno, line) in enumerate(numbered):
         before = "\n".join(t for n, t in numbered[max(0, i - _SECRET_CONTEXT):i] if n >= lno - _SECRET_CONTEXT)
-        _check_line_patterns(rel_path, lno, line, findings, before)
-    return findings
+        _check_line_patterns(rel_path, lno, line, raw_findings, before)
+
+        for pattern, closer in _UNCLOSED_CONSTRUCTS:
+            if pattern.search(line) and closer not in line:
+                combined_parts = [line]
+                curr_lno = lno
+                for j in range(i + 1, min(i + 11, len(numbered))):
+                    next_lno, next_line = numbered[j]
+                    if next_lno != curr_lno + 1:
+                        break
+                    combined_parts.append(next_line)
+                    curr_lno = next_lno
+                    if closer in next_line:
+                        break
+                combined_line = " ".join(combined_parts)
+                _check_line_patterns(rel_path, lno, combined_line, raw_findings, before)
+                break
+
+    return _dedup_findings(raw_findings)

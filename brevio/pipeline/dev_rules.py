@@ -15,6 +15,7 @@ import re
 from collections import Counter
 
 from brevio.pipeline import rule_host
+from brevio.pipeline.code_rules import PR_RULES_122
 
 CATALOG_RULES: dict[str, str] = {
     "R1.1": "Mobile GPU budget: scope blur >=40px to md:/lg: desktop viewports",
@@ -424,6 +425,11 @@ def _scan_single_file(rel_path: str, full_text: str, added: list[tuple[int, str]
     is_test = bool(_TEST_PATH_RX.search(low))
     is_ui = low.endswith((".tsx", ".jsx", ".css", ".scss"))
     is_ts_prod = low.endswith((".ts", ".tsx", ".js", ".jsx")) and not is_test
+
+    if is_ts_prod and ("'use client'" in full_text or '"use client"' in full_text) and (
+        "'server-only'" in full_text or '"server-only"' in full_text
+    ):
+        findings.append(f"{rel_path}: [R17.2] {PR_RULES_122['R17.2']}")
 
     is_contracts = bool(_CONTRACTS_PATH_RX.search(low))
     is_server_only = any(x in low for x in ("drift.ts", "-io.ts", "-node.ts", "server/"))
