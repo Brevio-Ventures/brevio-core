@@ -6,7 +6,7 @@
 # a write token to a run on code from a fork are never supported: the scan reads the code under review, and that code
 # must never run next to a write token (SECURITY-REVIEW.md). Third-party actions are pinned to full commit SHAs.
 name: 'Brevio Gate'
-description: 'Pull-request gate, no model call: 12 scanned rules as line patterns on the added lines, no secrets'
+description: 'Pull-request gate, no model call: 13 scanned rules as line patterns on the added lines, no secrets'
 author: 'Brevio'
 branding:
   icon: 'shield'
@@ -122,6 +122,7 @@ runs:
         NOTHING: ${{ steps.scan.outputs.nothing }}
         FOOTER: ${{ inputs.footer }}
         PRIVATE: ${{ github.event.repository.private }}
+        FAIL_ON: ${{ inputs.fail-on }}
       run: |
         import json
         import os
@@ -159,12 +160,17 @@ runs:
                 results += [r for r in run.get("results", []) if not r.get("suppressions")]
         except ValueError:
             print("::warning title=brevio-core::the SARIF file could not be read, so no annotations were written")
+        fail_on = env.get("FAIL_ON", "new")
         for r in results[:CAP]:
             where = (r.get("locations") or [{}])[0].get("physicalLocation", {})
             path = where.get("artifactLocation", {}).get("uri", "")
             line = where.get("region", {}).get("startLine", 1)
             title = esc(f"brevio-core {r.get('ruleId', '')}".strip(), prop=True)
-            print(f"::warning file={esc(path, prop=True)},line={line},title={title}::{esc(r.get('message', {}).get('text', ''))}")
+            level = "error" if r.get("level") == "error" and fail_on == "findings" else "warning"
+            if level == "error":
+                print(f"::error file={esc(path, prop=True)},line={line},title={title}::{esc(r.get('message', {}).get('text', ''))}")
+            else:
+                print(f"::warning file={esc(path, prop=True)},line={line},title={title}::{esc(r.get('message', {}).get('text', ''))}")
         if len(results) > CAP:
             print(f"::notice title=brevio-core::{len(results) - CAP} more findings are listed in the job summary")
 
@@ -258,6 +264,14 @@ runs:
           gh api --silent --method PATCH "$api/issues/comments/$existing" -F "body=@$body" 2> "$err" || failed
         else
           gh api --silent --method POST "$api/issues/$PR_NUMBER/comments" -F "body=@$body" 2> "$err" || failed
+        fi
+    - name: brevio-core / maintainer shield
+      shell: bash
+      env:
+        INPUT_COMMENT: ${{ inputs.comment }}
+      run: |
+        if [ -n "$INPUT_COMMENT" ] && [ "$INPUT_COMMENT" != "on-findings" ] && [ "$INPUT_COMMENT" != "always" ] && [ "$INPUT_COMMENT" != "never" ]; then
+          brevio-core shield --comment "$INPUT_COMMENT"
         fi
     - name: brevio-core / upload SARIF
       if: inputs.sarif == 'true'

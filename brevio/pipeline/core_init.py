@@ -194,6 +194,19 @@ def detect_agents(root: str) -> dict[str, bool]:
     }
 
 
+def _has_fastapi(root: str) -> bool:
+    for rel in ("pyproject.toml", "requirements.txt"):
+        p = os.path.join(root, rel)
+        if os.path.isfile(p):
+            try:
+                with open(p, encoding="utf-8", errors="ignore") as fh:
+                    if "fastapi" in fh.read().lower():
+                        return True
+            except OSError:
+                pass
+    return False
+
+
 def detect_stack(root: str) -> list[str]:
     """Detect technologies present in this repository by checking marker files."""
     checks = (
@@ -202,8 +215,14 @@ def detect_stack(root: str) -> list[str]:
         ("TypeScript", ("tsconfig.json",)),
         ("Docker", ("Dockerfile", "docker-compose.yml", "docker-compose.yaml")),
         ("Database/Migrations", ("prisma/schema.prisma", "migrations")),
+        ("Next.js", ("next.config.js", "next.config.ts", "next.config.mjs")),
+        ("Rust", ("Cargo.toml",)),
+        ("Go", ("go.mod",)),
     )
-    return [label for label, rels in checks if any(os.path.exists(os.path.join(root, r)) for r in rels)]
+    detected = [label for label, rels in checks if any(os.path.exists(os.path.join(root, r)) for r in rels)]
+    if _has_fastapi(root) and "FastAPI" not in detected:
+        detected.append("FastAPI")
+    return detected
 
 
 def live_hook_selftest() -> str:
@@ -296,6 +315,15 @@ def plan_agents_md(ctx: Ctx) -> list[Op]:
     if ctx.agents.get("cursor") and not os.path.exists(ctx.path(CURSOR_RULE)):
         ops.append(Op(CURSOR_RULE, "file", '---\ndescription: "brevio-core rules for this repository"\nalwaysApply: true\n'
                                            f"---\n{agent_skill.AGENT_RULES}"))
+    for extra in (".windsurfrules", ".clinerules", ".github/copilot-instructions.md"):
+        extra_path = ctx.path(extra)
+        if os.path.isfile(extra_path):
+            extra_text = _read(extra_path)
+            if extra_text is not None:
+                if MARK_START in extra_text:
+                    ctx.notes.append(f"agents-md: {extra} has the brevio-core block already")
+                else:
+                    ops.append(_append(extra, extra_text, agents_block()))
     return ops
 
 

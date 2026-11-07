@@ -31,6 +31,7 @@ SITE_FILES = {"robots_txt": "robots.txt", "llms_txt": "llms.txt", "skill_md": "s
 FORMATS = ("text", "markdown", "json")
 _SCHEME = re.compile(r"^[a-z][a-z0-9+.-]*://", re.I)
 _HOST = re.compile(r"^(?:[a-z0-9-]+\.)+([a-z]{2,})(?::\d+)?(?:/.*)?$", re.I)
+_LOCALHOST = re.compile(r"^localhost(?::\d+)?(?:/.*)?$", re.I)
 _FILE_WORDS = frozenset({"html", "htm", "md", "txt", "json", "xml"})
 
 
@@ -41,6 +42,8 @@ class UsageError(Exception):
 def is_url(arg: str) -> bool:
     """``arg`` names a web address, not a local path: it has a scheme, or it is a host name that is not on disk."""
     if _SCHEME.match(arg):
+        return True
+    if _LOCALHOST.match(arg) and not os.path.exists(arg):
         return True
     m = _HOST.match(arg)
     return bool(m) and not os.path.exists(arg) and m.group(1).lower() not in _FILE_WORDS
@@ -162,24 +165,36 @@ class _MetaParser(HTMLParser):
         super().__init__()
         self._in_title = False
         self._in_h1 = False
+        self._in_svg = False
         self.title_parts: list[str] = []
         self.h1_parts: list[str] = []
         self.description = ""
 
     def handle_starttag(self, tag: str, attrs: list[tuple[str, str | None]]) -> None:
         t = tag.lower()
-        if t == "title" and not self.title_parts:
+        if t == "svg":
+            self._in_svg = True
+        elif t == "title" and not self._in_svg and not self.title_parts:
             self._in_title = True
         elif t == "h1" and not self.h1_parts:
             self._in_h1 = True
-        elif t == "meta" and not self.description:
+        elif t == "meta":
             attr_map = {k.lower(): (v or "") for k, v in attrs if k}
-            if attr_map.get("name", "").lower() == "description":
-                self.description = attr_map.get("content", "").strip()
+            name = attr_map.get("name", "").lower()
+            prop = attr_map.get("property", "").lower()
+            content = attr_map.get("content", "").strip()
+            if name == "description" and content:
+                self.description = content
+                self._has_standard_desc = True
+            elif not getattr(self, "_has_standard_desc", False) and not self.description and content:
+                if prop in ("og:description", "twitter:description") or name in ("og:description", "twitter:description"):
+                    self.description = content
 
     def handle_endtag(self, tag: str) -> None:
         t = tag.lower()
-        if t == "title":
+        if t == "svg":
+            self._in_svg = False
+        elif t == "title" and self._in_title:
             self._in_title = False
         elif t == "h1":
             self._in_h1 = False

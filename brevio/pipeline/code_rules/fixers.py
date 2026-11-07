@@ -20,6 +20,9 @@ class Fixer(NamedTuple):
     replacement: str
     summary: str
 
+    def __call__(self, line: str) -> str:
+        return self.pattern.sub(self.replacement, line)
+
 
 _TARGET_BLANK_FIX_RX = re.compile(r"""(<a\b(?![^>]*\brel\s*=)[^>]*?\btarget\s*=\s*["']_blank["'])""", re.I)
 
@@ -29,6 +32,18 @@ def fix_target_blank(line: str) -> str:
     return _TARGET_BLANK_FIX_RX.sub(r'\1 rel="noopener noreferrer"', line)
 
 
+_REQUESTS_TIMEOUT_FIX_RX = re.compile(
+    r"^([^()\n]*\brequests\.(?:get|post|put|delete|patch|head)\s*\([^()\n]+)(\).*)$"
+)
+
+fix_requests_timeout = Fixer(
+    (".py",),
+    _REQUESTS_TIMEOUT_FIX_RX,
+    r"\1, timeout=30\2",
+    "single-line requests call gets `, timeout=30`",
+)
+
+
 FIXERS: dict[str, Fixer] = {
     # Only the comment directive is rewritten; ``@ts-ignore`` inside a string stays a finding for a person to read.
     "R9.2": Fixer((".ts", ".tsx", ".js", ".jsx"), re.compile(r"(//|/\*)(\s*)@ts-ignore\b"), r"\1\2@ts-expect-error",
@@ -36,6 +51,7 @@ FIXERS: dict[str, Fixer] = {
     # ``except BaseException:`` catches exactly what a bare ``except:`` catches, so behaviour does not change.
     "R5.4": Fixer((".py",), re.compile(r"^(\s*)except\s*:"), r"\1except BaseException:",
                   "bare `except:` becomes `except BaseException:` (same behaviour, now explicit)"),
+    "R10.1": fix_requests_timeout,
     "R18.2": Fixer((".tsx", ".jsx", ".html", ".vue", ".svelte"), _TARGET_BLANK_FIX_RX,
                    r'\1 rel="noopener noreferrer"',
                    '`target="_blank"` link gets `rel="noopener noreferrer"`'),

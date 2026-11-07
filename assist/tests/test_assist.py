@@ -243,5 +243,23 @@ class TestNoSdk(unittest.TestCase):
         self.assertEqual(foreign, [])
 
 
+class TestAssistHeal(AssistCase):
+    def test_assist_heal_clean_workspace(self):
+        with open(os.path.join(self.root, "src", "api.ts"), "w", encoding="utf-8") as fh:
+            fh.write("export const add = (a: number, b: number): number => a + b;\n")
+        code, out, _err = self.run_cli("heal", "--yes")
+        self.assertEqual(code, assist.EXIT_OK)
+        self.assertIn("workspace is clean", out)
+        self.assertEqual(self.endpoint.requests, [])
+
+    def test_assist_heal_needs_repair_sends_heal_packet(self):
+        code, out, _err = self.run_cli("heal", "--yes")
+        self.assertEqual(code, assist.EXIT_OK)
+        self.assertEqual(len(self.endpoint.requests), 1)
+        sent = self.endpoint.requests[0]
+        self.assertIn("brevio_heal_packet", json.dumps(sent["body"]))
+        self.assertIn("Use @ts-expect-error.", out)
+
+
 if __name__ == "__main__":
     unittest.main()

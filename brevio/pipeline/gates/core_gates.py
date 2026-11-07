@@ -35,7 +35,10 @@ _TEST_SKIP_FOCUS_RE = re.compile(
     r"(?:\b(?:it|test|describe)\.(?:skip|only)\s*\(|\b(?:xit|xtest|xdescribe)\s*\(|@(?:pytest\.mark\.skip|unittest\.skip)\b)"
 )
 _TAUTOLOGICAL_ASSERT_RE = re.compile(
-    r"(?:\bassert\s+(?:True|1\s*==\s*1)\b|\bexpect\s*\(\s*(?:true|1)\s*\)\s*\.to(?:Be|Equal)\s*\(\s*(?:true|1)\s*\))"
+    r"(?:\bassert\s+(?:True|1\s*==\s*1)\b"
+    r"|\bassert\s+([A-Za-z_]\w*)\s*==\s*\1\b"
+    r"|\bexpect\s*\(\s*(?:true|1)\s*\)\s*\.to(?:Be|Equal)\s*\(\s*(?:true|1)\s*\)"
+    r"|\bexpect\s*\(\s*([A-Za-z_]\w*)\s*\)\s*\.to(?:Be|Equal|StrictEqual)\s*\(\s*\2\s*\))"
 )
 _MIGRATION_PATH_RE = re.compile(
     r"(?:^|/)(?:migrations|prisma/migrations|alembic/versions|drizzle)/",
@@ -127,7 +130,7 @@ def _js_has_cut_import(content: str, test_frameworks: set[str]) -> bool:
 def check_test_imports(lines: dict[str, list[tuple[int, str]]], root: str = ".") -> list[str]:
     """Check that test files with assertions import the module under test."""
     findings: list[str] = []
-    test_frameworks = {"unittest", "pytest", "vitest", "jest", "@jest"}
+    test_frameworks = {"unittest", "pytest", "vitest", "jest", "@jest", "assert", "node:assert", "chai"}
     py_ignored = test_frameworks | set(getattr(sys, "stdlib_module_names", ()))
 
     for rel in sorted(lines.keys()):
@@ -142,7 +145,7 @@ def check_test_imports(lines: dict[str, list[tuple[int, str]]], root: str = ".")
         except OSError:
             continue
 
-        if not re.search(r"(?:\bassert(?:\s+|\()|self\.assert\w*|\bexpect\s*\()", content):
+        if not re.search(r"(?:\bassert(?:\s+|\()|self\.assert\w*|\bexpect\s*\(|pytest\.raises|assertRaises|assert\.\w+)", content):
             continue
 
         py_ok = _py_has_cut_import(content, path, py_ignored) if rel.endswith(".py") else None
@@ -158,7 +161,7 @@ def _count_tests_and_asserts(text: str) -> tuple[int, int]:
         ln for ln in text.splitlines() if not re.match(r"^\s*(?:#|//|\*)", ln)
     )
     tests = len(re.findall(r"(?:def\s+test_\w+|(?:\b|^)(?:it|test)\s*\()", active))
-    asserts = len(re.findall(r"(?:(?:\bassert(?:\s+|\())|(?:self\.assert\w*)|(?:\bexpect\s*\())", active))
+    asserts = len(re.findall(r"(?:(?:\bassert(?:\s+|\())|(?:self\.assert\w*)|(?:\bexpect\s*\()|pytest\.raises|assertRaises|assert\.\w+)", active))
     return tests, asserts
 
 
@@ -178,6 +181,92 @@ def check_test_tampering(lines: dict[str, list[tuple[int, str]]]) -> list[str]:
             if _TAUTOLOGICAL_ASSERT_RE.search(text):
                 findings.append(
                     f"{rel}:{lno}: [R6.5] Tautological test assertion; assert real output or state"
+                )
+    return findings
+
+
+_EMPTY_JS_TEST_RE = re.compile(
+    r"""(?:it|test)\s*\(\s*['"][^'"]*['"]\s*,\s*(?:\([^)]*\)|function\s*\([^)]*\))\s*=>?\s*\{\s*\}\s*\)"""
+)
+
+
+def check_empty_test_blocks(
+    lines: dict[str, list[tuple[int, str]]],
+    root: str = ".",
+) -> list[str]:
+    """Check for empty test function or block definitions (R6.1 / R6.6)."""
+    findings: list[str] = []
+    for rel, numbered in sorted(lines.items()):
+        if not TEST_FILE_RE.search(rel):
+            continue
+        path = os.path.join(root, rel)
+        if rel.endswith(".py"):
+            content = None
+            if os.path.isfile(path):
+                try:
+                    with open(path, encoding="utf-8", errors="ignore") as fh:
+                        content = fh.read()
+                except OSError:
+                    pass
+            if content is not None:
+                try:
+                    tree = ast.parse(content, rel)
+                    for node in ast.walk(tree):
+                        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+                            if node.name.startswith("test_"):
+                                real_stmts = [
+                                    s for s in node.body
+                                    if not (
+                                        isinstance(s, ast.Pass)
+                                        or (
+                                            isinstance(s, ast.Expr)
+                                            and isinstance(s.value, ast.Constant)
+                                        )
+                                    )
+                                ]
+                                if not real_stmts:
+                                    func_lines = set(range(node.lineno, getattr(node, "end_lineno", node.lineno) + 1))
+                                    added_lnos = {lno for lno, _ in numbered}
+                                    if (func_lines & added_lnos) or not numbered:
+                                        findings.append(
+                                            f"{rel}:{node.lineno}: [R6.1] Empty test block `{node.name}`; test must contain assertions"
+                                        )
+                except SyntaxError:
+                    pass
+        for lno, text in numbered:
+            if _COMMENT_LINE_RE.match(text):
+                continue
+            if _EMPTY_JS_TEST_RE.search(text):
+                findings.append(
+                    f"{rel}:{lno}: [R6.1] Empty test block; test must contain assertions"
+                )
+            elif re.search(r"def\s+test_\w+\s*\([^)]*\)\s*:\s*(?:pass|\.\.\.)\s*$", text):
+                findings.append(
+                    f"{rel}:{lno}: [R6.1] Empty test block; test must contain assertions"
+                )
+    seen: set[str] = set()
+    deduped: list[str] = []
+    for f in findings:
+        if f not in seen:
+            seen.add(f)
+            deduped.append(f)
+    return deduped
+
+
+_AI_SLOP_MARKERS_RE = re.compile(
+    r"""(?i)(?:\bas an ai language model\b|certainly!\s*here (?:is|'s) the\b|certainly,\s*here (?:is|'s) the\b|let me know if you(?:'d|\s+would) like me to\b|here (?:is|'s) the updated (?:code|implementation)\b|i hope this helps\b)"""
+)
+
+
+def check_ai_slop_markers(lines: dict[str, list[tuple[int, str]]]) -> list[str]:
+    """Check for conversational AI residue markers in added comments or strings."""
+    findings: list[str] = []
+    for rel, numbered in sorted(lines.items()):
+        for lno, text in numbered:
+            m = _AI_SLOP_MARKERS_RE.search(text)
+            if m:
+                findings.append(
+                    f"{rel}:{lno}: [R19.3] Conversational AI marker detected in added code: `{m.group(0)}`"
                 )
     return findings
 
@@ -623,6 +712,7 @@ def run_check(
     base: str = "HEAD",
     lines: dict[str, list[tuple[int, str]]] | None = None,
     paths: list[str] | None = None,
+    diff: str | None = None,
 ) -> dict[str, Any]:
     """Run all flight checks: rules scan, conflict markers, test imports, test custody, complexity, and orphan files."""
     if lines is None:
@@ -634,9 +724,16 @@ def run_check(
         core_cli.scan_surface(lines, root=root)
         + check_migration_safety(lines, root=root, base=base)
         + check_resolved_imports(lines, root=root)
+        + check_empty_test_blocks(lines, root=root)
+        + check_ai_slop_markers(lines)
         + agent_findings
         + env_findings
     )
+    try:
+        rule_findings, _, _ = core_cli.triage(rule_findings, root=root)
+    except TypeError:
+        rule_findings, _, _ = core_cli.triage(rule_findings)
+
     conflict_findings = check_conflict_markers(lines)
     test_import_findings = check_test_imports(lines, root=root)
     custody_findings = check_test_custody(root=root, base=base, lines=lines)

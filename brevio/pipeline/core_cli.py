@@ -48,6 +48,7 @@ LONG_LINE = 500         # a file whose first two lines are longer than this is m
 MAX_BYTES = 1_000_000
 AGENT_MAX = 20          # finding lines an agent is shown at once; a longer list is cut, so one reply stays short
 AGENT_HINT = 100        # characters of the rule's good example a finding line carries
+FORMATS = ("text", "markdown", "agent", "json", "github")
 # DOTALL: a file name may hold a newline, and its finding must still parse (so the Markdown report escapes it).
 _FINDING = re.compile(r"^(?P<path>.+?):(?P<line>\d+): (?:\[(?P<rule>[^\]]+)\] )?(?P<msg>.*)$", re.S)
 _HUNK = re.compile(r"^@@ -\S+ \+(\d+)")
@@ -285,11 +286,19 @@ def sarif(findings: list[str], silenced: Iterable[tuple[str, str]] = (),
             "ruleId": fields["rule"], "level": "warning" if level(f) == "warn" else "error",
             "message": {"text": fields["message"]},
             "locations": [{"physicalLocation": {"artifactLocation": {"uri": fields["path"]},
-                                                "region": {"startLine": fields["line"]}}}]}
+                                                "region": {"startLine": fields["line"], "endLine": fields["line"], "startColumn": 1}}}]}
         if reason is not None:
             result["suppressions"] = [{"kind": "inSource", "justification": reason}]
         results.append(result)
-    rules = [{"id": rid, "shortDescription": {"text": text}} for rid, text in sorted(PR_RULES_122.items())]
+    rules = [
+        {
+            "id": rid,
+            "shortDescription": {"text": text},
+            "defaultConfiguration": {"level": "error"},
+            "helpUri": f"https://brevio.pro/tools/agent-guard-playground?rule={rid}",
+        }
+        for rid, text in sorted(PR_RULES_122.items())
+    ]
     return {"version": "2.1.0",
             "runs": [{"tool": {"driver": {"name": "brevio-core", "rules": rules}}, "results": results}]}
 
@@ -315,7 +324,7 @@ class UsageError(Exception):
 
 def set_module(package: str, name: str) -> Any:
     """The module ``name`` of ``package`` from a later export set, or ``None`` in a build that does not ship it."""
-    top = __name__.split(".")[0]
+    top = "brevio" if __name__.startswith("__main__") else __name__.split(".")[0]
     try:
         return importlib.import_module(f"{top}.{package}.{name}")   # a name built at run time: absent from earlier sets
     except ModuleNotFoundError as err:
@@ -385,17 +394,29 @@ def _load_baseline(tools: Any) -> Any:
         raise UsageError(str(exc)) from exc
 
 
-def triage(found: list[str], fail_on: str = "new", honour_ignores: bool = True) -> Triaged:
+def triage(found: list[str] | None = None, fail_on: Any = "new", honour_ignores: bool = True,
+           lines: Any = None, config: Any = None, root: str = ".", findings: list[str] | None = None) -> Triaged:
     """``found`` split into shown, silenced and baselined findings; all shown in a build without the 0.4 set.
 
     ``fail_on`` ``all`` ignores the baseline. ``honour_ignores`` is false on the agent paths (hook, MCP), so an agent
     cannot silence a rule; such a finding says the comment counts in CI only."""
+    if findings is not None:
+        found = findings
+    if found is None:
+        found = []
+    if not isinstance(fail_on, str) or fail_on not in ("new", "all", "none"):
+        fail_on = "new"
+        if not isinstance(honour_ignores, bool):
+            honour_ignores = True
     tools = baseline_tools()
     if tools is None:
         return found, [], []
     base = None if fail_on == "all" else _load_baseline(tools)
     t = tools.triage(found, finding_fields, line_reader(), base, honour_ignores, commented)
-    return t.shown, t.silenced, t.baselined
+    shown = t.shown
+    if hasattr(tools, "partition"):
+        shown = tools.partition(shown, root=root)
+    return shown, t.silenced, t.baselined
 
 
 def new_suppressions(lines: Numbered, base: str) -> list[str]:
@@ -532,13 +553,26 @@ def _run_baseline(named: list[str], diff: str | None) -> int:
 
 
 def _print_findings(shown: list[str], silenced: int, baselined: int, args: argparse.Namespace) -> None:
-    if getattr(args, "format", "text") == "agent":
+    fmt = getattr(args, "format", "text")
+    if fmt == "agent":
         print("\n".join(agent_lines(shown)), end="\n" if shown else "")
         return
-    if getattr(args, "format", "text") == "markdown":
+    if fmt == "markdown":
         rows = [f for f in map(finding_fields, shown) if f]
         footer = upgrade_line("pr-comment", not getattr(args, "no_upgrade_line", False))
         print(set_module("pipeline", MARKDOWN_MODULE).render(rows, silenced, baselined, args.rules_url, footer), end="")
+        return
+    if fmt == "json":
+        print(json.dumps({"findings": [finding_fields(f) for f in shown], "count": len(shown)}, indent=2))
+        return
+    if fmt == "github":
+        for f in shown:
+            fields = finding_fields(f) or {}
+            path = fields.get("path", "")
+            line = fields.get("line", 1)
+            rule = fields.get("rule", "")
+            message = fields.get("message", "")
+            print(f"::warning file={path},line={line},title={rule}::{message}")
         return
     for f in shown:
         print(f)
@@ -584,11 +618,17 @@ AEO_MODULE = "core_aeo"         # the 0.6 set's ``aeo``, the AEO rubric on local
 CHECK_MODULE = "core_gates"     # the 0.6 set's ``check`` pre-PR flight check
 BRIEF_MODULE = "core_memory"    # the 0.6 set's ``brief`` surface rules & trap recall
 SCORE_MODULE = "core_score"     # the 0.6 set's ``score`` Agent Safety Score & README badge
+MAP_MODULE = "core_map"
+HEAL_MODULE = "core_heal"
+SHIELD_MODULE = "core_shield"
 
 
 def _opt_cmd(cmd: str, pkg: str, mod_name: str) -> tuple[dict[str, Callable[[list[str]], int]], dict[str, str]]:
     mod = set_module(pkg, mod_name)
-    return ({cmd: mod.main}, {cmd: mod.HELP}) if mod is not None else ({}, {})
+    if mod is None or not hasattr(mod, "main"):
+        return ({}, {})
+    hlp = getattr(mod, "HELP", f"run brevio-core {cmd}")
+    return ({cmd: mod.main}, {cmd: hlp})
 
 
 def init_command() -> tuple[dict[str, Callable[[list[str]], int]], dict[str, str]]:
@@ -628,6 +668,44 @@ def score_command() -> tuple[dict[str, Callable[[list[str]], int]], dict[str, st
     return _opt_cmd("score", "pipeline", SCORE_MODULE)
 
 
+def map_command() -> tuple[dict[str, Callable[[list[str]], int]], dict[str, str]]:
+    return _opt_cmd("map", "pipeline", MAP_MODULE)
+
+
+def heal_command() -> tuple[dict[str, Callable[[list[str]], int]], dict[str, str]]:
+    return _opt_cmd("heal", "pipeline", HEAL_MODULE)
+
+
+def shield_command() -> tuple[dict[str, Callable[[list[str]], int]], dict[str, str]]:
+    return _opt_cmd("shield", "pipeline", SHIELD_MODULE)
+
+
+def roast_command() -> tuple[dict[str, Callable[[list[str]], int]], dict[str, str]]:
+    mod = set_module("pipeline", SCORE_MODULE)
+    if mod is None or not hasattr(mod, "main"):
+        return ({}, {})
+
+    def _run_roast(rest: list[str]) -> int:
+        return mod.main(["--roast", *rest], prog="brevio-core roast")
+
+    return ({"roast": _run_roast}, {"roast": "score the repository and print the engineering roast verdict"})
+
+
+def _learn(argv: list[str]) -> int:
+    mod = set_module("operator", "learn_cmd")
+    if mod is None or not hasattr(mod, "main"):
+        raise UsageError("learn command is not available in this build")
+    rc = mod.main(argv, prog="brevio-core learn")
+    if rc == 0:
+        try:
+            skill_mod = set_module("pipeline.gates", "agent_skill")
+            if skill_mod is not None and hasattr(skill_mod, "sync_learned_guards_to_skill"):
+                skill_mod.sync_learned_guards_to_skill(".")
+        except Exception:
+            pass
+    return rc
+
+
 def _add_baseline_arguments(sub: Any, sc: argparse.ArgumentParser) -> None:
     """The 0.4 set: ``baseline`` and the scan flags that read it."""
     tools = baseline_tools()
@@ -641,7 +719,7 @@ def _add_baseline_arguments(sub: Any, sc: argparse.ArgumentParser) -> None:
                     help="with --diff: do not report the ignore comments and baseline entries the change adds "
                          "(for a change a person has reviewed)")
     if set_module("pipeline", MARKDOWN_MODULE) is not None:
-        sc.add_argument("--format", choices=("text", "markdown", "agent"), default="text",
+        sc.add_argument("--format", choices=FORMATS, default="text",
                         help="how to print the findings (agent: one short line each with a fix hint, grouped by rule, "
                              f"at most {AGENT_MAX})")
         sc.add_argument("--rules-url", default="", metavar="BASE", help="with --format markdown: link each rule ID to BASE<ID>")
@@ -681,9 +759,34 @@ def parser(tools: Iterable[str], tool_help: dict[str, str]) -> argparse.Argument
         cf = sub.add_parser("config", help=f"show the {cfg.CONFIG_NAME} settings that apply to a file or folder")
         cf.add_argument("path", nargs="?", default=".", help="the file or folder (default: the current folder)")
         cf.add_argument("--json", action="store_true", help="print it as JSON")
+    exp = sub.add_parser("explain", help="explain a rule, why it exists, and how to fix it")
+    exp.add_argument("rule_id", help="the rule id (e.g. R13.1)")
+    rl = sub.add_parser("rules", help="list or query documented rules")
+    rl.add_argument("--json", action="store_true", help="print rules catalog as JSON")
+    rl.add_argument("-q", "--query", default=None, metavar="QUERY", help="filter rules by text query")
     lk = sub.add_parser("leaks", help="check a folder for stray URLs, emails and paths that should not be public")
     lk.add_argument("root", nargs="?", default=".", help="the folder to check (default: the current folder)")
     return ap
+
+
+def _run_explain(rule_id: str) -> int:
+    rid = rule_id.upper()
+    if rid not in PR_RULES_122:
+        raise UsageError(f"unknown rule: {rule_id}")
+    print(rule_docs.render(rid))
+    return 0
+
+
+def _run_rules(as_json: bool, query: str | None) -> int:
+    q = (query or "").strip().lower()
+    rules = [{"id": rid, "summary": PR_RULES_122[rid]} for rid in rule_docs.rule_ids()
+             if not q or q in rid.lower() or q in PR_RULES_122[rid].lower()]
+    if as_json:
+        print(json.dumps({"rules": rules, "count": len(rules)}, indent=2))
+    else:
+        for r in rules:
+            print(f"{r['id']}: {r['summary']}")
+    return 0
 
 
 def _run_config(path: str, as_json: bool) -> int:
@@ -700,6 +803,10 @@ def _run_config(path: str, as_json: bool) -> int:
 
 
 def _dispatch(args: argparse.Namespace) -> int:
+    if args.cmd == "explain":
+        return _run_explain(args.rule_id)
+    if args.cmd == "rules":
+        return _run_rules(args.json, args.query)
     if args.cmd == "config":
         return _run_config(args.path, args.json)
     named = [*args.paths, *getattr(args, "file", [])]
@@ -721,8 +828,34 @@ def line_commands() -> tuple[dict[str, Callable[[list[str]], int]], dict[str, st
     """``(commands, help)`` of every command that reads the rest of its line itself, in the order ``--help`` lists them:
     the agent tools, ``init``, ``aeo``, ``check``, ``brief``, ``score`` and ``up``, each where the build ships it."""
     tools, tool_help = agent_tools()
-    for more, more_help in (init_command(), aeo_command(), check_command(), brief_command(), score_command(), up_command()):
+    for more, more_help in (
+        init_command(),
+        aeo_command(),
+        check_command(),
+        brief_command(),
+        score_command(),
+        roast_command(),
+        map_command(),
+        heal_command(),
+        shield_command(),
+        up_command(),
+    ):
         tools, tool_help = {**tools, **more}, {**tool_help, **more_help}
+    if "learn" in tools:
+        orig_learn = tools["learn"]
+
+        def _learn_wrapped(argv: list[str]) -> int:
+            rc = orig_learn(argv)
+            if rc == 0:
+                try:
+                    skill_mod = set_module("pipeline.gates", "agent_skill")
+                    if skill_mod is not None and hasattr(skill_mod, "sync_learned_guards_to_skill"):
+                        skill_mod.sync_learned_guards_to_skill(".")
+                except Exception:
+                    pass
+            return rc
+
+        tools["learn"] = _learn_wrapped
     return tools, tool_help
 
 
