@@ -1,6 +1,6 @@
-# brevio-core 0.9.0
+# brevio-core 0.9.1
 
-Exported from harness commit `fa5108166ebe11df8319643993ce7ce398d47821` of 2026-11-07.
+Exported from harness commit `12ec026c6a323d5187f866a48073f8296781356f` of 2026-11-07.
 
 This tree was produced by the harness exporter and checked for leaks before it was written. To reproduce it, check out that commit and run the exporter.
 

@@ -23,7 +23,7 @@ Add the server to your Codex configuration (`~/.codex/config.toml`):
 ```toml
 [mcp_servers.brevio-core]
 command = "uvx"
-args = ["brevio-core==0.8.1", "mcp"]
+args = ["brevio-core==0.9.1", "mcp"]
 ```
 
 Start Codex in the repository: the server reads only the folder it was started in. The tools are `scan`, `explain`,
