@@ -1,5 +1,9 @@
 # Scoring a site for answer engines: `brevio-core aeo`
 
+| In Plain English (For Anyone) | Technical Contract (For Engineers) |
+| --- | --- |
+| **What it does:** Grades your built website HTML, `robots.txt`, and `llms.txt` so AI search engines (Perplexity, ChatGPT, Claude) can discover and cite your pages accurately.<br>**When to use it:** On your static build folder (`out/`, `dist/`, `.next/`) locally or in CI. | **Command:** `brevio-core aeo <folder> [--min SCORE]`<br>**Inputs:** Built `.html` files, `robots.txt`, `llms.txt`, `skill.md`<br>**Exit Codes:** The exit code is 0 when nothing is found, 1 when not. |
+
 `brevio-core aeo` scores how well the pages of a built site can be found, read and cited by answer engines (AEO). It is
 a separate command from the pull-request gate and reads a folder of built HTML pages:
 

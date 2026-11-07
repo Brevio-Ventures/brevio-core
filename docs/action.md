@@ -1,5 +1,9 @@
 # The GitHub Action
 
+| In Plain English (For Anyone) | Technical Contract (For Engineers) |
+| --- | --- |
+| **What it does:** Automatically checks every pull request for AI coding mistakes, posts a single clean summary comment, and blocks unsafe merges.<br>**When to use it:** In `.github/workflows/brevio-core.yml` on `pull_request`, `merge_group`, and `push`. | **Action:** `Brevio-Ventures/brevio-core@v0.9.1`<br>**Command Run:** `brevio-core scan --diff <base> --format markdown`<br>**Exit Codes:** The exit code is 0 when nothing is found, 1 when not. |
+
 The Action installs `brevio-core` and runs `brevio-core scan --diff <base>` on the lines a change adds. It needs no
 secret and makes no model call. It ships from the root of the brevio-core repository, so a workflow names it as
 `Brevio-Ventures/brevio-core`.

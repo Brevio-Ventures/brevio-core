@@ -1,5 +1,9 @@
 # Coding agent integrations
 
+| In Plain English (For Anyone) | Technical Contract (For Engineers) |
+| --- | --- |
+| **What it does:** Connects `brevio-core` directly to Claude Code, Cursor, Codex, Hermes, and OpenClaw so your coding agent checks and repairs its own edits automatically.<br>**When to use it:** Run `brevio-core init` or `brevio-core hook install` in any git repository. | **Commands:** `brevio-core init`, `brevio-core hook install`, `brevio-core mcp`<br>**Catalogue:** 123 rules (13 scanned, 110 documented)<br>**Exit Codes:** The exit code is 0 when nothing is found, 1 when not. |
+
 brevio-core checks an agent's work in three places. Use all three; each catches what the one before let through.
 
 1. **In the agent's loop.** A hook scans each file right after the agent edits it, and the uncommitted changes when

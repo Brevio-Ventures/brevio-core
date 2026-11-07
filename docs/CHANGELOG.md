@@ -4,7 +4,7 @@
 
 ### Rules and fixers
 
-- `brevio-core scan` now checks 12 scanned rules of the 123 in the catalogue (111 documented): R5.5 flags `subprocess`
+- `brevio-core scan` now checks 13 scanned rules of the 123 in the catalogue (110 documented): R5.5 flags `subprocess`
   calls with `shell=True` and `os.system` calls with interpolated strings in Python; R10.1 flags single-line `requests`
   calls without `timeout=` in Python; R16.2 flags `"*"` and `"latest"` dependency ranges in `package.json`; and R18.2
   flags single-line `target="_blank"` anchor tags without `rel="noopener noreferrer"`.

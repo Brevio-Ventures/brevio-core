@@ -1,5 +1,9 @@
 # Questions people ask
 
+| In Plain English (For Anyone) | Technical Contract (For Engineers) |
+| --- | --- |
+| **What it does:** Answers common questions about how `brevio-core` catches AI coding mistakes, why agents cannot bypass it, and how it fits alongside linters and CI.<br>**When to read it:** When evaluating `brevio-core` for your repository or engineering team. | **Runtime:** Python standard library (`3.10`, `3.11`, `3.12`, `3.13`)<br>**Catalogue:** 123 rules (13 scanned, 110 documented)<br>**Exit Codes:** The exit code is 0 when nothing is found, 1 when not. |
+
 ## What is it for?
 
 Coding agents repeat the same mistakes: a silenced type error, an `as any`, an empty `catch`, a hardcoded key, a sleep
