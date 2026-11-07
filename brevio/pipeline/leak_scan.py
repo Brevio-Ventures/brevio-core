@@ -73,6 +73,8 @@ def bad_emails(text: str) -> list[str]:
     """Email addresses in ``text`` that are neither a placeholder nor a published address."""
     out = []
     for m in _EMAIL.finditer(text):
+        if text[m.end():m.end() + 1] == ":":    # git SSH address (git@host:repo), not an email
+            continue
         if m.group(0).lower() not in ALLOWED_EMAILS and m.group(1).lower() not in PLACEHOLDER_EMAIL_DOMAINS:
             out.append(m.group(0))
     return out
@@ -117,7 +119,7 @@ def tree_files(root: str) -> list[str]:
     """Every file under ``root`` (relative, sorted), leaving out ``.git``."""
     out = []
     for dirpath, dirs, names in os.walk(root):
-        dirs[:] = [d for d in dirs if d not in (".git", "__pycache__")]
+        dirs[:] = [d for d in dirs if d not in (".git", "__pycache__", ".pytest_cache", ".mypy_cache", ".ruff_cache")]
         out += [os.path.relpath(os.path.join(dirpath, n), root).replace(os.sep, "/") for n in names]
     return sorted(out)
 
@@ -133,7 +135,8 @@ def scan_tree(root: str, org: str | None = None) -> list[str]:
         text = read_text(os.path.join(root, rel))
         if text is None:
             continue
-        problems += [f"{rel}: url: {u}" for u in bad_urls(text, org)]
+        file_org = org or ("example-org" if rel.startswith("tests/") else None)
+        problems += [f"{rel}: url: {u}" for u in bad_urls(text, file_org)]
         problems += [f"{rel}: email: {e}" for e in bad_emails(text)]
         if rel != SOURCE_MAP:
             problems += [f"{rel}: internal path: {p}" for p in bad_internal_paths(text, root)]

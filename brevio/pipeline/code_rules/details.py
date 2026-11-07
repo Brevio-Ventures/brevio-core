@@ -44,6 +44,7 @@ SCANS: dict[str, tuple[str, str]] = {
     "R10.1": ("code", "src/client.py"),
     "R13.1": ("code", "src/client.ts"),
     "R16.2": ("code", "package.json"),
+    "R17.2": ("code", "src/Component.tsx"),
     "R2.8": ("code", "src/run.ts"),
     "R18.1": ("code", "src/Logo.tsx"),
     "R18.2": ("code", "src/Link.tsx"),

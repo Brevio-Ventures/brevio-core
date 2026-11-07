@@ -84,14 +84,30 @@ class TestProtocol(unittest.TestCase):
         init = replies[0]["result"]
         self.assertEqual((init["protocolVersion"], init["serverInfo"]["name"]), ("2025-06-18", "brevio-core"))
         self.assertIn("tools", init["capabilities"])
+        self.assertIn("resources", init["capabilities"])
+        self.assertIn("prompts", init["capabilities"])
         tools = {t["name"]: t for t in replies[1]["result"]["tools"]}
         has_fix = os.path.isfile(os.path.join(TREE, "brevio", "pipeline", "code_rules", "fixers.py"))   # the 0.3 set adds fix
         has_brief = os.path.isfile(os.path.join(TREE, "brevio", "pipeline", "core_memory.py"))          # the 0.6 set adds brief
         has_check = os.path.isfile(os.path.join(TREE, "brevio", "pipeline", "gates", "core_gates.py"))  # the 0.6 set adds check
-        self.assertEqual(
-            sorted(tools),
-            [*(['brief'] if has_brief else []), *(['check'] if has_check else []), "explain", *(["fix"] if has_fix else []), "learn", "list_rules", "scan"],
-        )
+        has_score = os.path.isfile(os.path.join(TREE, "brevio", "pipeline", "core_score.py"))
+        has_aeo = os.path.isfile(os.path.join(TREE, "brevio", "pipeline", "core_aeo.py"))
+        has_map = os.path.isfile(os.path.join(TREE, "brevio", "pipeline", "core_map.py"))
+        has_heal = os.path.isfile(os.path.join(TREE, "brevio", "pipeline", "core_heal.py"))
+        expected_tools = sorted([
+            *(['aeo'] if has_aeo else []),
+            *(['brief'] if has_brief else []),
+            *(['check'] if has_check else []),
+            "explain",
+            *(["fix"] if has_fix else []),
+            *(['heal'] if has_heal else []),
+            "learn",
+            "list_rules",
+            *(['map'] if has_map else []),
+            "scan",
+            *(['score'] if has_score else []),
+        ])
+        self.assertEqual(sorted(tools), expected_tools)
         for t in tools.values():
             self.assertEqual(t["inputSchema"]["type"], "object")
             ann = t["annotations"]
@@ -137,6 +153,68 @@ class TestProtocol(unittest.TestCase):
                                  timeout=60, input="", env={"PATH": _BIN.name})
         self.assertEqual(res.returncode, 2)
         self.assertEqual(res.stdout, "")
+
+    def test_resources_list_and_read(self):
+        with tempfile.TemporaryDirectory() as d:
+            replies, _err, code = session(
+                d,
+                rpc(1, "resources/list"),
+                rpc(2, "resources/templates/list"),
+                rpc(3, "resources/read", {"uri": "brevio://rules/catalog"}),
+                rpc(4, "resources/read", {"uri": "brevio://rules/R13.1"}),
+            )
+        self.assertEqual(code, 0)
+        self.assertEqual([r["id"] for r in replies], [1, 2, 3, 4])
+        res_list = replies[0]["result"]["resources"]
+        uris = [r["uri"] for r in res_list]
+        self.assertIn("brevio://rules/catalog", uris)
+        has_map = os.path.isfile(os.path.join(TREE, "brevio", "pipeline", "core_map.py"))
+        if has_map:
+            self.assertIn("brevio://map", uris)
+        templates = replies[1]["result"]["resourceTemplates"]
+        self.assertEqual(templates[0]["uriTemplate"], "brevio://rules/{rule_id}")
+        cat_content = replies[2]["result"]["contents"][0]
+        self.assertEqual(cat_content["uri"], "brevio://rules/catalog")
+        self.assertIn("R13.1", cat_content["text"])
+        r131_content = replies[3]["result"]["contents"][0]
+        self.assertEqual(r131_content["uri"], "brevio://rules/R13.1")
+        self.assertIn("R13.1", r131_content["text"])
+
+    def test_prompts_list_and_get(self):
+        with tempfile.TemporaryDirectory() as d:
+            replies, _err, code = session(
+                d,
+                rpc(1, "prompts/list"),
+                rpc(2, "prompts/get", {"name": "audit-diff", "arguments": {"diff_base": "HEAD"}}),
+                rpc(3, "prompts/get", {"name": "pre-edit-brief", "arguments": {"files": "src/app.ts"}}),
+                rpc(4, "prompts/get", {"name": "remediate-findings", "arguments": {"paths": "."}}),
+            )
+        self.assertEqual(code, 0)
+        self.assertEqual([r["id"] for r in replies], [1, 2, 3, 4])
+        prompts = replies[0]["result"]["prompts"]
+        names = [p["name"] for p in prompts]
+        self.assertEqual(sorted(names), ["audit-diff", "pre-edit-brief", "remediate-findings"])
+        for idx in (1, 2, 3):
+            res = replies[idx]["result"]
+            self.assertIn("messages", res)
+            self.assertTrue(len(res["messages"]) > 0)
+            self.assertIn("text", res["messages"][0]["content"])
+
+    def test_map_and_heal_tools_when_available(self):
+        has_map = os.path.isfile(os.path.join(TREE, "brevio", "pipeline", "core_map.py"))
+        has_heal = os.path.isfile(os.path.join(TREE, "brevio", "pipeline", "core_heal.py"))
+        with tempfile.TemporaryDirectory() as d:
+            write(d, "app.py", "def main(): pass\n")
+            if has_map:
+                replies, _err, code = session(d, call(1, "map", root=d))
+                self.assertEqual(code, 0)
+                self.assertFalse(replies[0]["result"]["isError"])
+                r_rep, _, _ = session(d, rpc(2, "resources/read", {"uri": "brevio://map"}))
+                self.assertIn("contents", r_rep[0]["result"])
+            if has_heal:
+                replies, _err, code = session(d, call(1, "heal", root=d))
+                self.assertEqual(code, 0)
+                self.assertFalse(replies[0]["result"]["isError"])
 
 
 class TestScanTool(unittest.TestCase):

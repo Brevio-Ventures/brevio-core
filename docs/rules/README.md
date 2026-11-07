@@ -1,6 +1,6 @@
 # Rules
 
-One page per rule: what it catches, why, a bad and a good example, how it is checked and how to silence it. There are 123 rules. `brevio-core scan` checks 12 of them. The harness's pre-flight checks 10 more, which `brevio-core scan` does not run; 22 more are slice cards; the rest are standing rules. Generated from the rule definitions; do not edit by hand.
+One page per rule: what it catches, why, a bad and a good example, how it is checked and how to silence it. There are 123 rules. `brevio-core scan` checks 13 of them. The harness's pre-flight checks 10 more, which `brevio-core scan` does not run; 22 more are slice cards; the rest are standing rules. Generated from the rule definitions; do not edit by hand.
 
 
 ## R1: UI and mobile performance
@@ -157,7 +157,7 @@ One page per rule: what it catches, why, a bad and a good example, how it is che
 ## R17: React and Next.js patterns
 
 - [R17.1](R17.1.md) Server Component default
-- [R17.2](R17.2.md) No server-only code in client
+- [R17.2](R17.2.md) No server-only code in client (brevio-core scan)
 - [R17.3](R17.3.md) Metadata API compliance
 - [R17.4](R17.4.md) Next/Image usage
 - [R17.5](R17.5.md) Next/Font optimization

@@ -40,6 +40,9 @@ from brevio.pipeline import core_cli
 from brevio.pipeline.gates import agent_hooks
 from brevio.pipeline.rule_host import GIT
 
+EXIT_OK = 0
+EXIT_BLOCK = 2
+
 DEFAULT_BUDGET = 2.0    # seconds of scanning an agent waits for after an edit; past it the hook lets the agent go on
 EVENTS = (agent_hooks.POST_EDIT, agent_hooks.POST_COMMAND, agent_hooks.STOP)
 CLIENTS = (agent_hooks.CLAUDE_CODE, agent_hooks.CURSOR)
@@ -179,12 +182,17 @@ def answer(raw: str, kind: str, installed: str) -> str:
     if installed == agent_hooks.CLAUDE_CODE and ev.client == agent_hooks.CURSOR and _cursor_hook_installed(root):
         return ""       # Cursor runs Claude Code's hooks as well; its own brevio-core hook answers
     if ev.kind == agent_hooks.POST_COMMAND:
-        return reply(ev, LEARN_HINT)    # a suggestion only: ``learn`` is the person's or the agent's own next step
+        tip = ""
+        if re.search(r"\b(?:pytest|vitest|jest|cargo\s+test|go\s+test)\b", ev.command) and not re.search(r"\b-q\b|\brtk\b", ev.command):
+            tip = " (Tip: add -q or rtk to quiet verbose test runs.)"
+        return reply(ev, LEARN_HINT + tip)
     os.chdir(root)      # the scan and the baseline read paths from the repository root
     lines = changed_lines(ev)
     raw_findings = core_cli.scan(lines)
-    if ev.kind == agent_hooks.STOP and core_cli.has_head():
-        gates = core_cli.set_module("pipeline.gates", "core_gates")
+    gates = core_cli.set_module("pipeline.gates", "core_gates")
+    if ev.kind == agent_hooks.POST_EDIT and gates is not None:
+        raw_findings += gates.check_conflict_markers(lines)
+    elif ev.kind == agent_hooks.STOP and core_cli.has_head():
         if gates is not None:
             raw_findings += (
                 gates.check_conflict_markers(lines)
@@ -194,7 +202,23 @@ def answer(raw: str, kind: str, installed: str) -> str:
                 + gates.check_agent_files(root=".")
             )
     shown = core_cli.triage(raw_findings, "new", honour_ignores=False)[0]
-    return reply(ev, message(ev, shown)) if shown else ""
+    if not shown:
+        return ""
+    text = message(ev, shown)
+    if ev.kind == agent_hooks.STOP:
+        heal_mod = core_cli.set_module("pipeline", "core_heal")
+        heal_packet = ""
+        if heal_mod is not None:
+            try:
+                rep = heal_mod.run_heal(root=".", apply_fixes=False, compile_guards=False, max_chars=2000)
+                heal_packet = rep.get("heal_packet", "")
+            except Exception:
+                pass
+        if heal_packet:
+            text += "\n\nSelf-heal packet:\n" + heal_packet
+        else:
+            text += "\n\nRun `brevio-core heal` to auto-fix and generate surgical repair packets."
+    return reply(ev, text)
 
 
 def run(kind: str, installed: str, budget: float, stdin: TextIO, stdout: TextIO, stderr: TextIO) -> int:
@@ -227,7 +251,9 @@ def run(kind: str, installed: str, budget: float, stdin: TextIO, stdout: TextIO,
     elif box.get("out"):
         stdout.write(box["out"] + "\n")
         stdout.flush()
-    return 0
+        if kind == agent_hooks.STOP:
+            return EXIT_BLOCK
+    return EXIT_OK
 
 
 def main(argv: list[str], prog: str = "brevio-core hook run") -> int:

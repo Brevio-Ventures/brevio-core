@@ -10,7 +10,55 @@ E22, 2026-11-05).
 """
 from __future__ import annotations
 
+import importlib
+import json
+import os
+import re
+from typing import Any
+
 SKILL_PATH = "skills/brevio-core/SKILL.md"
+
+LEARNED_START = "<!-- BREVIO_LEARNED_GUARDS_START -->"
+LEARNED_END = "<!-- BREVIO_LEARNED_GUARDS_END -->"
+
+_UNSAFE_PATTERNS = [
+    r"(?:curl|wget)\s+[^\n|]+\|\s*(?:ba)?sh\b",
+    r"rm\s+-(?:r[fF]|fr)\s+/",
+    r"\beval\s*\(",
+    r"`[^`\n]+`",
+    r"\$\([^)\n]+\)",
+    r"\bsk-[A-Za-z0-9]{16,}\b",
+    r"\bghp_[A-Za-z0-9]{20,}\b",
+    r"\bAKIA[0-9A-Z]{16}\b",
+    r"ignore\s+(?:all\s+)?previous\s+instructions",
+    r"disregard\s+(?:the\s+)?system\s+prompt",
+    r"you\s+are\s+now\s+in\s+developer\s+mode",
+]
+_UNSAFE_RE = re.compile("|".join(f"(?:{p})" for p in _UNSAFE_PATTERNS), re.IGNORECASE)
+
+
+def _get_memory_sanitizer() -> Any:
+    top = __name__.split(".")[0]
+    try:
+        mod = importlib.import_module(f"{top}.pipeline.core_memory")
+        return getattr(mod, "sanitize_memory_text", None)
+    except (ImportError, AttributeError):
+        return None
+
+
+def _sanitize(text: str) -> tuple[bool, str]:
+    fn = _get_memory_sanitizer()
+    if fn is not None:
+        return fn(text)
+    if not isinstance(text, str):
+        return True, ""
+    match = _UNSAFE_RE.search(text)
+    if match:
+        cleaned = _UNSAFE_RE.sub("", text)
+        cleaned = re.sub(r"[ \t]+", " ", cleaned).strip()
+        return False, cleaned
+    return True, text.strip()
+
 
 AGENT_RULES = """- After you edit code, scan the files you changed: `brevio-core scan <files>`.
 - Fix every finding in the code itself, also those the agent hook reports after an edit or before you stop.
@@ -56,6 +104,7 @@ brevio-core mcp                        # serve these tools over MCP on stdin and
 If the command is not on the path, put `uvx` in front of it.
 
 The MCP server offers `scan`, `explain`, `list_rules` and `learn` as tools, so an agent can call them without a shell.
+Agent commands also support `map` for symbol dependency graphs, `heal` for automated code remediation, and `roast` for safety posture verdicts.
 
 ## How to read findings
 
@@ -72,3 +121,92 @@ findings and 2 for a usage error.
 ## Rules
 
 {AGENT_RULES}"""
+
+
+def sync_learned_guards_to_skill(root: str = ".") -> dict[str, Any]:
+    """Sync active guards and recent safe lessons to SKILL.md and cursor rules."""
+    guards_file = os.path.join(root, ".brevio", "guards.json")
+    active_items: list[dict[str, str]] = []
+    seen: set[tuple[str, str]] = set()
+
+    if os.path.isfile(guards_file):
+        try:
+            with open(guards_file, encoding="utf-8") as fh:
+                gdata = json.load(fh)
+            raw = gdata.get("guards", {})
+            items = raw if isinstance(raw, list) else list(raw.values()) if isinstance(raw, dict) else []
+            for g in items:
+                if isinstance(g, dict) and g.get("status", "active") in ("active", "trial"):
+                    gid = g.get("id") or "guard"
+                    desc = g.get("title") or g.get("description") or (", ".join(g.get("patterns", []))) or "Active invariant guard"
+                    pair = (str(gid), str(desc))
+                    if pair not in seen:
+                        seen.add(pair)
+                        active_items.append({"id": str(gid), "desc": str(desc)})
+        except Exception:
+            pass
+
+    memory_file = os.path.join(root, ".brevio", "memory.jsonl")
+    if os.path.isfile(memory_file):
+        try:
+            with open(memory_file, encoding="utf-8") as fh:
+                for line in fh:
+                    line = line.strip()
+                    if not line:
+                        continue
+                    try:
+                        entry = json.loads(line)
+                    except json.JSONDecodeError:
+                        continue
+                    text = entry.get("text") or (f"{entry.get('trap', '')} -> {entry.get('fix', '')}" if entry.get("trap") else "")
+                    is_safe, cleaned = _sanitize(text)
+                    if not is_safe or not cleaned:
+                        continue
+                    lid = entry.get("rule_id") or entry.get("id") or entry.get("file") or "lesson"
+                    pair = (str(lid), str(cleaned))
+                    if pair not in seen:
+                        seen.add(pair)
+                        active_items.append({"id": str(lid), "desc": str(cleaned)})
+        except Exception:
+            pass
+
+    section_lines = [
+        LEARNED_START,
+        "## Repository-Specific Learned Invariants (Auto-Evolved)",
+    ]
+    for item in active_items:
+        section_lines.append(f"- **[{item['id']}]**: {item['desc']}")
+    section_lines.append(LEARNED_END)
+    section_block = "\n".join(section_lines)
+
+    targets = [
+        os.path.join("skills", "brevio-core", "SKILL.md"),
+        os.path.join(".cursor", "rules", "brevio-core.mdc"),
+    ]
+    updated_files: list[str] = []
+    pattern = re.compile(
+        re.escape(LEARNED_START) + r".*?" + re.escape(LEARNED_END),
+        re.DOTALL,
+    )
+
+    for rel in targets:
+        full = os.path.join(root, rel)
+        if not os.path.isfile(full):
+            continue
+        try:
+            with open(full, encoding="utf-8") as fh:
+                content = fh.read()
+            if LEARNED_START in content and LEARNED_END in content:
+                new_content = pattern.sub(section_block, content)
+            else:
+                new_content = content.rstrip() + "\n\n" + section_block + "\n"
+            with open(full, "w", encoding="utf-8") as fh:
+                fh.write(new_content)
+            updated_files.append(rel.replace(os.sep, "/"))
+        except OSError:
+            pass
+
+    return {
+        "updated_files": updated_files,
+        "guards_synced": len(active_items),
+    }

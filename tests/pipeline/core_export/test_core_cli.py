@@ -190,5 +190,93 @@ class TestLeaksCommand(unittest.TestCase):
                 self.assertEqual(called, [["--wizard"]])
 
 
+HAS_TRACK_D = os.path.isfile(os.path.join(ROOT, "brevio", "pipeline", "core_shield.py"))
+
+
+@unittest.skipUnless(HAS_TRACK_D, "Track D subcommands require 0.6 set")
+class TestTrackDSubcommands(unittest.TestCase):
+    def test_roast_subcommand_text_badge_and_json(self):
+        with tempfile.TemporaryDirectory() as d:
+            write(d, "src/ok.ts", CLEAN_LINE)
+            # Text output
+            res = run_cli(d, "roast")
+            self.assertEqual(res.returncode, 0)
+            self.assertIn("brevio-core score: 100/100", res.stdout)
+            self.assertIn("Verdict: Zero agent-slop detected", res.stdout)
+            self.assertIn("README Badge:", res.stdout)
+            self.assertIn("Verified Receipt:", res.stdout)
+
+            # Badge only
+            badge_res = run_cli(d, "roast", "--badge")
+            self.assertEqual(badge_res.returncode, 0)
+            self.assertIn("[![Agent Safety:", badge_res.stdout)
+
+            # JSON output
+            json_res = run_cli(d, "roast", "--json")
+            self.assertEqual(json_res.returncode, 0)
+            data = json.loads(json_res.stdout)
+            self.assertEqual(data["score"], 100)
+            self.assertEqual(data["grade"], "A+")
+            self.assertIn("Zero agent-slop", data["roast"])
+            self.assertIn("badge_markdown", data)
+            self.assertIn("receipt_url", data)
+
+    def test_roast_subcommand_with_finding_shows_engineering_roast(self):
+        with tempfile.TemporaryDirectory() as d:
+            write(d, "src/bad.ts", AWS_EXAMPLE_LINE)
+            res = run_cli(d, "roast")
+            self.assertEqual(res.returncode, 0)
+            self.assertIn("Engineering Roast:", res.stdout)
+            self.assertIn("R13.1", res.stdout)
+            self.assertIn("AI wrote code violating", res.stdout)
+
+    def test_map_subcommand_text_and_json(self):
+        with tempfile.TemporaryDirectory() as d:
+            write(d, "src/main.ts", CLEAN_LINE)
+            res = run_cli(d, "map")
+            self.assertEqual(res.returncode, 0)
+            self.assertIn("# Repository Symbol Map", res.stdout)
+
+            json_res = run_cli(d, "map", "--json")
+            self.assertEqual(json_res.returncode, 0)
+            data = json.loads(json_res.stdout)
+            self.assertIn("root", data)
+            self.assertIn("ranked_files", data)
+
+    def test_heal_subcommand_text_and_json(self):
+        with tempfile.TemporaryDirectory() as d:
+            write(d, "src/ok.ts", CLEAN_LINE)
+            res = run_cli(d, "heal")
+            self.assertEqual(res.returncode, 0)
+            self.assertIn("Self-heal complete", res.stdout)
+
+            json_res = run_cli(d, "heal", "--json")
+            self.assertEqual(json_res.returncode, 0)
+            data = json.loads(json_res.stdout)
+            self.assertTrue(data.get("ok"))
+            self.assertEqual(data.get("status"), "clean")
+
+    def test_shield_subcommand_explain_roast_and_fix(self):
+        with tempfile.TemporaryDirectory() as d:
+            # explain
+            exp_res = run_cli(d, "shield", "--comment", "@brevio explain R13.1")
+            self.assertEqual(exp_res.returncode, 0)
+            self.assertIn("R13.1", exp_res.stdout)
+            self.assertIn("Zero secret logging", exp_res.stdout)
+
+            # roast
+            roast_res = run_cli(d, "shield", "--comment", "@brevio roast")
+            self.assertEqual(roast_res.returncode, 0)
+            self.assertIn("Verdict:", roast_res.stdout)
+
+            # fix (JSON output)
+            fix_res = run_cli(d, "shield", "--comment", "@brevio fix", "--json")
+            self.assertEqual(fix_res.returncode, 0)
+            data = json.loads(fix_res.stdout)
+            self.assertTrue(data.get("matched"))
+            self.assertEqual(data.get("command"), "fix")
+            self.assertTrue(data.get("ok"))
+
+
 if __name__ == "__main__":
     unittest.main()

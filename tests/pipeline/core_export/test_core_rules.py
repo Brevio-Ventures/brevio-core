@@ -143,6 +143,63 @@ class TestCodeRules(unittest.TestCase):
         ]})
         self.assertEqual(sorted(f.split(" ")[1] for f in found), ["[R5.4]", "[R9.2]"])
 
+    def test_selective_comment_and_string_masking(self):
+        found = scan_added_lines_for_rules({
+            "src/safe.ts": [
+                'const x = 1; // avoid as any',
+                'const msg = "never call eval(x)";',
+                'const warning = `do not use ${name} as any`;',
+            ],
+            "src/real_violations.ts": [
+                'const x = (y as any);',
+                'eval(userInput);',
+            ],
+        })
+        self.assertEqual(sorted(f.split(":")[0] for f in found), ["src/real_violations.ts", "src/real_violations.ts"])
+        self.assertEqual(sorted(f.split(" ")[1] for f in found), ["[R2.8]", "[R9.1]"])
+
+    def test_contiguous_multiline_coalescing(self):
+        found = scan_added_lines_for_rules({
+            "src/Component.tsx": [
+                '  <img',
+                '    src="/logo.png"',
+                '  />',
+                '  <div',
+                '    onClick={handleClick}',
+                '  >',
+            ],
+            "src/client.py": [
+                'resp = requests.get(',
+                '    url,',
+                '    headers=headers,',
+                ')',
+            ],
+            "src/db.py": [
+                'db.execute(',
+                '    f"SELECT * FROM users WHERE id = {uid}"',
+                ')',
+            ],
+        })
+        self.assertTrue(any("Component.tsx:1: [R18.1]" in f for f in found))
+        self.assertTrue(any("Component.tsx:4: [R18.5]" in f for f in found))
+        self.assertTrue(any("client.py:1: [R10.1]" in f for f in found))
+        self.assertTrue(any("db.py:1: [R2.8]" in f for f in found))
+
+    def test_r172_use_client_with_server_only(self):
+        found = scan_added_lines_for_rules({
+            "src/bad.tsx": [
+                "'use client';",
+                "import 'server-only';",
+            ],
+            "src/good.tsx": [
+                "'use client';",
+                "import { Button } from './button';",
+            ],
+        })
+        self.assertEqual(len(found), 1)
+        self.assertTrue(found[0].startswith("src/bad.tsx:"))
+        self.assertIn("[R17.2]", found[0])
+
     def test_test_only_components_are_not_checked_for_accessibility(self):
         line = "      return <div onClick={() => setIndex(1)}>{data}</div>"
         img = "  <img src={url} />"

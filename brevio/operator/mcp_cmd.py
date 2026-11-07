@@ -137,6 +137,90 @@ def _gates_module() -> Any:
     return core_cli.set_module("pipeline.gates", "core_gates")
 
 
+def _score_module() -> Any:
+    return core_cli.set_module("pipeline", "core_score")
+
+
+def _aeo_module() -> Any:
+    return core_cli.set_module("pipeline", "core_aeo")
+
+
+def _map_module() -> Any:
+    return core_cli.set_module("pipeline", "core_map")
+
+
+def _heal_module() -> Any:
+    return core_cli.set_module("pipeline", "core_heal")
+
+
+def _swe_tools_module() -> Any:
+    mod = core_cli.set_module("llm", "swe_tools")
+    if mod is not None and (hasattr(mod, "repo_map_tool") or hasattr(mod, "build_repo_map")):
+        return mod
+    return None
+
+
+def _tool_score(args: dict[str, Any]) -> ToolResult:
+    score_mod = _score_module()
+    if score_mod is None:
+        raise ToolError("score module is not available")
+    named = _named_paths(args)
+    base = _base(args, "diff_base")
+    try:
+        card = score_mod.compute_scorecard(named, base)
+    except core_cli.UsageError as exc:
+        raise ToolError(str(exc)) from exc
+    text = score_mod.render_text(card)
+    return text.strip(), card
+
+
+def _tool_aeo(args: dict[str, Any]) -> ToolResult:
+    aeo_mod = _aeo_module()
+    if aeo_mod is None:
+        raise ToolError("aeo module is not available")
+    named = _named_paths(args)
+    target = named[0] if named else "."
+    try:
+        card = aeo_mod.scorecard(target, min_score=0)
+    except Exception as exc:
+        raise ToolError(str(exc)) from exc
+    text = aeo_mod.render_text(card)
+    return text.strip(), card
+
+
+def _tool_map(args: dict[str, Any]) -> ToolResult:
+    map_mod = _map_module()
+    if map_mod is None:
+        raise ToolError("map module is not available")
+    root = str(args.get("root", ".")).strip() or "."
+    seed_files = _text_list(args, "seed_files") if "seed_files" in args else None
+    token_budget = int(args.get("token_budget", 4000))
+    try:
+        data = map_mod.build_repo_map(root=root, seed_files=seed_files, token_budget=token_budget, as_json=True)
+    except Exception as exc:
+        raise ToolError(str(exc)) from exc
+    if isinstance(data, dict):
+        text = str(data.get("map") or data.get("rendered") or json.dumps(data, indent=2))
+        return text, data
+    return str(data), {"map": data}
+
+
+def _tool_heal(args: dict[str, Any]) -> ToolResult:
+    heal_mod = _heal_module()
+    if heal_mod is None:
+        raise ToolError("heal module is not available")
+    root = str(args.get("root", ".")).strip() or "."
+    apply_fixes = bool(args.get("apply_fixes", False))
+    try:
+        res = heal_mod.run_heal(root=root, apply_fixes=apply_fixes)
+    except Exception as exc:
+        raise ToolError(str(exc)) from exc
+    if isinstance(res, dict):
+        text = str(res.get("markdown") or res.get("heal_packet") or json.dumps(res, indent=2))
+        return text, res
+    return str(res), {"heal": res}
+
+
 def _tool_check(args: dict[str, Any]) -> ToolResult:
     gates = _gates_module()
     named = _named_paths(args)
@@ -234,6 +318,22 @@ TOOLS: dict[str, tuple[str, dict[str, Any], dict[str, Any], Callable[[dict[str, 
               _schema({"base": {**_STR, "description": "Git revision to diff against (default HEAD)."},
                        "paths": {"type": "array", "items": _STR, "description": "Files or folders inside the project to check."}}),
               _annotations("Run Pre-PR Flight Check", read_only=True), _tool_check),
+    "score": ("Compute the Agent Safety Score (0-100, A+ to F) and return badge markdown and scorecard.",
+              _schema({"paths": {"type": "array", "items": _STR, "description": "Files or folders to score."},
+                       "diff_base": {**_STR, "description": "Score only lines added against this git revision."}}),
+              _annotations("Compute Agent Safety Score", read_only=True), _tool_score),
+    "aeo": ("Score local HTML pages against the Answer Engine Optimization (AEO) rubric.",
+            _schema({"paths": {"type": "array", "items": _STR, "description": "Folder or HTML file to evaluate."}}),
+            _annotations("Evaluate Local AEO Rubric", read_only=True), _tool_aeo),
+    "map": ("Build repository symbol hierarchy and PageRank context map.",
+            _schema({"root": {**_STR, "description": "Project root directory (default .)."},
+                     "seed_files": {"type": "array", "items": _STR, "description": "Seed files for focused PageRank map."},
+                     "token_budget": {"type": "integer", "description": "Token budget for the repository map (default 4000)."}}),
+            _annotations("Build Repository Symbol Map", read_only=True), _tool_map),
+    "heal": ("Autonomous repair loop that surfaces violations and emits an atomic remediation heal packet.",
+             _schema({"root": {**_STR, "description": "Project root directory (default .)."},
+                      "apply_fixes": {"type": "boolean", "description": "Apply deterministic AST fixes before generating packet (default false)."}}),
+             _annotations("Run Autonomous Heal Loop", read_only=False), _tool_heal),
 }
 
 
@@ -250,6 +350,10 @@ def _available() -> dict[str, tuple[str, dict[str, Any], dict[str, Any], Callabl
         "fix": core_cli.fixers() is None,
         "brief": _memory_module() is None,
         "check": _gates_module() is None,
+        "score": _score_module() is None,
+        "aeo": _aeo_module() is None,
+        "map": _map_module() is None,
+        "heal": _heal_module() is None,
     }
     return {n: t for n, t in TOOLS.items() if not absent.get(n)}
 
@@ -276,6 +380,155 @@ def call_tool(params: Any) -> dict[str, Any]:
     return {"content": [{"type": "text", "text": text}], "structuredContent": data, "isError": False}
 
 
+def _resource_list() -> list[dict[str, Any]]:
+    res = [
+        {
+            "uri": "brevio://rules/catalog",
+            "name": "Rules Catalog",
+            "description": "Complete catalog of documented rules",
+            "mimeType": "application/json",
+        }
+    ]
+    if _score_module() is not None:
+        res.append({
+            "uri": "brevio://scorecard",
+            "name": "Agent Safety Scorecard",
+            "description": "Deterministic safety score and breakdown for current workspace",
+            "mimeType": "application/json",
+        })
+    if _map_module() is not None:
+        res.append({
+            "uri": "brevio://map",
+            "name": "Repository Symbol Map",
+            "description": "Symbol hierarchy and PageRank map for current workspace",
+            "mimeType": "application/json",
+        })
+    if core_cli.config_tools() is not None:
+        res.append({
+            "uri": "brevio://config",
+            "name": "Brevio Configuration",
+            "description": "Active brevio-core.toml configuration settings",
+            "mimeType": "application/json",
+        })
+    return res
+
+
+def _resource_templates() -> list[dict[str, Any]]:
+    return [
+        {
+            "uriTemplate": "brevio://rules/{rule_id}",
+            "name": "Rule Explanation",
+            "description": "Full documentation and bad/good examples for a rule ID (e.g. R13.1)",
+            "mimeType": "text/markdown",
+        }
+    ]
+
+
+def _read_resource(params: Any) -> dict[str, Any]:
+    if not isinstance(params, dict) or not isinstance(params.get("uri"), str):
+        raise ValueError("a resource read needs a uri string")
+    uri = params["uri"]
+    if uri == "brevio://rules/catalog":
+        data = [{"id": rid, "summary": PR_RULES_122[rid]} for rid in rule_docs.rule_ids()]
+        return {"contents": [{"uri": uri, "mimeType": "application/json", "text": json.dumps(data, indent=2)}]}
+    if uri == "brevio://scorecard":
+        score_mod = _score_module()
+        if score_mod is None:
+            raise ToolError("score module not available in this build")
+        card = score_mod.compute_scorecard()
+        return {"contents": [{"uri": uri, "mimeType": "application/json", "text": json.dumps(card, indent=2)}]}
+    if uri == "brevio://map":
+        map_mod = _map_module()
+        if map_mod is None:
+            raise ToolError("map module not available in this build")
+        try:
+            data = map_mod.build_repo_map(root=".", as_json=True)
+        except Exception as exc:
+            raise ToolError(str(exc)) from exc
+        if isinstance(data, (dict, list)):
+            text = json.dumps(data, indent=2)
+            mime = "application/json"
+        else:
+            text = str(data)
+            mime = "text/plain"
+        return {"contents": [{"uri": uri, "mimeType": mime, "text": text}]}
+    if uri == "brevio://config":
+        cfg = core_cli.config_tools()
+        if cfg is None:
+            raise ToolError("config module not available in this build")
+        proj = core_cli.project(["."])
+        desc = cfg.describe(proj, ".", core_cli.scanned_rules(), core_cli.rule_status, True)
+        return {"contents": [{"uri": uri, "mimeType": "application/json", "text": json.dumps(desc, indent=2)}]}
+    if uri.startswith("brevio://rules/"):
+        rule_id = uri.split("/")[-1].upper()
+        if rule_id not in PR_RULES_122:
+            raise ToolError(f"unknown rule: {rule_id}")
+        return {"contents": [{"uri": uri, "mimeType": "text/markdown", "text": rule_docs.render(rule_id)}]}
+    raise ToolError(f"unknown resource URI: {uri}")
+
+
+PROMPTS = [
+    {
+        "name": "audit-diff",
+        "description": "Audit uncommitted or base git diff for code defects and agent-slop",
+        "arguments": [{"name": "diff_base", "description": "Git revision to diff against (default HEAD)", "required": False}],
+    },
+    {
+        "name": "pre-edit-brief",
+        "description": "Generate a pre-edit briefing including active rules and remembered traps for target files",
+        "arguments": [{"name": "files", "description": "Space-separated or comma-separated file paths to edit", "required": True}],
+    },
+    {
+        "name": "remediate-findings",
+        "description": "Generate instructions to remediate active findings and defects without suppressions",
+        "arguments": [{"name": "paths", "description": "Files or directories to scan and remediate", "required": False}],
+    },
+]
+
+
+def _prompt_list() -> list[dict[str, Any]]:
+    return list(PROMPTS)
+
+
+def _get_prompt(params: Any) -> dict[str, Any]:
+    if not isinstance(params, dict) or not isinstance(params.get("name"), str):
+        raise ValueError("prompts/get needs a prompt name")
+    name = params["name"]
+    args = params.get("arguments") or {}
+    if name == "audit-diff":
+        diff_base = args.get("diff_base", "HEAD")
+        text = (
+            f"Review the git diff against '{diff_base}' using `scan` and `check` tools. "
+            "Identify all code defects, unhandled error cases, secret leaks, and security risks. "
+            "Ensure zero rule suppressions are introduced."
+        )
+        return {
+            "description": "Audit git diff for code defects",
+            "messages": [{"role": "user", "content": {"type": "text", "text": text}}],
+        }
+    if name == "pre-edit-brief":
+        files = args.get("files", "")
+        text = (
+            f"Before editing files ({files}), call `brief` with these files to inspect active surface micro-rules, "
+            "recalled trap-to-fix episodes, and 1-hop neighbor dependencies. Adhere to all recalled constraints."
+        )
+        return {
+            "description": "Pre-edit briefing for target files",
+            "messages": [{"role": "user", "content": {"type": "text", "text": text}}],
+        }
+    if name == "remediate-findings":
+        paths = args.get("paths", ".")
+        text = (
+            f"Scan the codebase under '{paths}' with `scan`. For any findings, call `explain` to understand the invariant "
+            "and fix each issue directly in the source code rather than adding ignore comments."
+        )
+        return {
+            "description": "Remediate active findings",
+            "messages": [{"role": "user", "content": {"type": "text", "text": text}}],
+        }
+    raise ToolError(f"unknown prompt: {name}")
+
+
 def _reply(msg_id: Any, *, result: Any = None, error: tuple[int, str] | None = None) -> dict[str, Any]:
     body: dict[str, Any] = {"jsonrpc": "2.0", "id": msg_id}
     if error:
@@ -298,7 +551,12 @@ def handle(message: Any) -> dict[str, Any] | None:
     if method == "initialize":
         asked = params.get("protocolVersion") if isinstance(params, dict) else None
         version = asked if asked in PROTOCOL_VERSIONS else PROTOCOL_VERSIONS[0]
-        return _reply(msg_id, result={"protocolVersion": version, "capabilities": {"tools": {}},
+        capabilities = {
+            "tools": {},
+            "resources": {"subscribe": False, "listChanged": False},
+            "prompts": {"listChanged": False},
+        }
+        return _reply(msg_id, result={"protocolVersion": version, "capabilities": capabilities,
                                       "serverInfo": {"name": "brevio-core", "version": server_version()}})
     if method == "ping":
         return _reply(msg_id, result={})
@@ -308,6 +566,22 @@ def handle(message: Any) -> dict[str, Any] | None:
         try:
             return _reply(msg_id, result=call_tool(params))
         except ValueError as exc:
+            return _reply(msg_id, error=(INVALID_PARAMS, str(exc)))
+    if method == "resources/list":
+        return _reply(msg_id, result={"resources": _resource_list()})
+    if method == "resources/templates/list":
+        return _reply(msg_id, result={"resourceTemplates": _resource_templates()})
+    if method == "resources/read":
+        try:
+            return _reply(msg_id, result=_read_resource(params))
+        except (ToolError, ValueError) as exc:
+            return _reply(msg_id, error=(INVALID_PARAMS, str(exc)))
+    if method == "prompts/list":
+        return _reply(msg_id, result={"prompts": _prompt_list()})
+    if method == "prompts/get":
+        try:
+            return _reply(msg_id, result=_get_prompt(params))
+        except (ToolError, ValueError) as exc:
             return _reply(msg_id, error=(INVALID_PARAMS, str(exc)))
     return _reply(msg_id, error=(METHOD_NOT_FOUND, f"method not found: {method}"))
 

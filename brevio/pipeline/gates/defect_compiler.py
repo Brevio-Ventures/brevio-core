@@ -93,14 +93,36 @@ def _extract_diff_hunks(diff_text: str) -> list[dict[str, Any]]:
     return hunks
 
 
+_TRIVIAL_STOP_WORDS = {
+    "return null;",
+    "return null",
+    "return none",
+    "return true;",
+    "return true",
+    "return false;",
+    "return false",
+    "pass",
+    "pass;",
+    "break;",
+    "break",
+    "continue;",
+    "continue",
+}
+
+
 def _synthesize_forbidden_patterns(removed: list[str]) -> list[str]:
     patterns: list[str] = []
-    for line in removed[:5]:
+    for line in removed[:10]:
         pat = line.replace("\\", "\\\\")
         pat = re.sub(r"\s+", " ", pat).strip()
+        pat_clean = pat.rstrip(";").lower()
+        if pat.lower() in _TRIVIAL_STOP_WORDS or pat_clean in _TRIVIAL_STOP_WORDS:
+            continue
         if len(pat) >= 8 and pat not in patterns:
             patterns.append(pat)
-    return patterns[:3]
+        if len(patterns) >= 3:
+            break
+    return patterns
 
 
 def _derive_guard_patterns(hunk: dict[str, Any]) -> tuple[list[str], str]:

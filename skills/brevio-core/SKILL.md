@@ -35,6 +35,7 @@ brevio-core mcp                        # serve these tools over MCP on stdin and
 If the command is not on the path, put `uvx` in front of it.
 
 The MCP server offers `scan`, `explain`, `list_rules` and `learn` as tools, so an agent can call them without a shell.
+Agent commands also support `map` for symbol dependency graphs, `heal` for automated code remediation, and `roast` for safety posture verdicts.
 
 ## How to read findings
 

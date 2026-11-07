@@ -15,14 +15,24 @@ HELP = {
     "hook": "install the scan hook into the coding agents found here (hook install | status | detect)",
     "gain": "print the savings receipt: counts always, savings only when measured",
     "add": "add a curated guard pack by name (no name lists the packs)",
+    "pack": "install or list community zero-token guard packs",
     "mcp": "serve scan, explain, list_rules and learn to an agent over MCP on stdin and stdout",
 }
 
 
 def _add(argv: list[str]) -> int:
-    """``add <pack>`` installs a pack; with no pack name it lists them."""
-    named = [a for a in argv if not a.startswith("-")]
-    return pack_cmd.main((["add", *argv] if named else ["list", *argv]), prog="brevio-core")
+    """``pack`` or ``add``: installs a pack or lists available packs."""
+    if not argv:
+        return pack_cmd.main(["list"], prog="brevio-core")
+    first = argv[0]
+    if first == "list":
+        return pack_cmd.main(argv, prog="brevio-core")
+    if first == "add":
+        return pack_cmd.main(argv, prog="brevio-core")
+    non_flags = [a for a in argv if not a.startswith("-")]
+    if not non_flags:
+        return pack_cmd.main(["list", *argv], prog="brevio-core")
+    return pack_cmd.main(["add", *argv], prog="brevio-core")
 
 
 COMMANDS: dict[str, Callable[[list[str]], int]] = {
@@ -30,5 +40,6 @@ COMMANDS: dict[str, Callable[[list[str]], int]] = {
     "hook": lambda argv: hook_cmd.main(argv, prog="brevio-core hook"),
     "gain": lambda argv: gain_cmd.main(argv, prog="brevio-core gain"),
     "add": _add,
+    "pack": _add,
     "mcp": lambda argv: mcp_cmd.main(argv, prog="brevio-core mcp"),
 }
