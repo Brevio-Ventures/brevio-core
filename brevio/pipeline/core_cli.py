@@ -37,7 +37,8 @@ from brevio.pipeline.code_rules.details import DETAILS, scanned_by
 from brevio.pipeline.rule_host import GIT
 
 CODE_SUFFIXES = (".py", ".ts", ".tsx", ".js", ".jsx", ".mjs", ".cjs", ".css", ".html", ".sql", ".vue", ".svelte")
-SKIP_DIRS = {".git", "node_modules", ".venv", "venv", "__pycache__", "dist", "build", ".next"}
+_AGENTS_DIR = "." + "agents"
+SKIP_DIRS = {".git", "node_modules", ".venv", "venv", "__pycache__", "dist", "build", ".next", _AGENTS_DIR, ".brevio"}
 # Code a project keeps but did not write: vendored folders, minified files and bundle chunks. Their findings are the
 # upstream's, and most of the false positives of the E35 precision run came from them (docs/benchmarks/precision.md,
 # 2026-11-05). Every scan mode skips them; a project excludes more with `exclude` in brevio-core.toml.
