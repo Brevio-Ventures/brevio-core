@@ -44,6 +44,10 @@ class TestScanCommand(unittest.TestCase):
             bad = run_cli(d, "scan", "src/bad.ts")
             self.assertEqual(bad.returncode, 1, bad.stderr)
             self.assertIn("src/bad.ts:1: [R13.1]", bad.stdout)
+            self.assertIn(
+                "Explain & test fix: brevio-core explain R13.1 | https://brevio.pro/tools/agent-guard-playground?rule=R13.1",
+                bad.stderr,
+            )
             self.assertEqual(run_cli(d, "scan", "src/ok.ts").returncode, 0)
 
     def test_a_diff_scan_skips_build_output(self):
@@ -168,6 +172,22 @@ class TestLeaksCommand(unittest.TestCase):
         with tempfile.TemporaryDirectory() as d:
             write(d, "a.md", "write to you@example.com\n")
             self.assertEqual(run_cli(d, "leaks").returncode, 0)
+
+    def test_interactive_entry_and_scan_surface_root_resolution(self):
+        from unittest import mock
+
+        from brevio.pipeline import core_cli
+
+        with tempfile.TemporaryDirectory() as d:
+            write(d, "styles/reveal.css", "[data-reveal] { opacity: 0; }\n")
+            found = core_cli.scan_surface({"styles/reveal.css": [(1, "[data-reveal] { opacity: 0; }")]}, root=d)
+            self.assertTrue(any("[R1.2]" in f for f in found), found)
+
+            with mock.patch.object(core_cli, "_git", return_value=d + "\n"):
+                called = []
+                rc = core_cli._interactive_entry({"init": lambda args: called.append(args) or 0})
+                self.assertEqual(rc, 0)
+                self.assertEqual(called, [["--wizard"]])
 
 
 if __name__ == "__main__":

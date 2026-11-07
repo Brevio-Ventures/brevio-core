@@ -82,6 +82,7 @@ class TestThePagesMatchTheDefinitions(unittest.TestCase):
         page = docs.render("R5.4")
         for head in ("## What it catches", "## Why", "## A bad example", "## A good example", "## How to silence it"):
             self.assertIn(head, page)
+        self.assertIn("Playground: <https://brevio.pro/tools/agent-guard-playground?rule=R5.4>", page)
 
     def test_a_page_is_a_search_landing_page_with_the_answer_first(self):
         text = docs.page("R9.2")

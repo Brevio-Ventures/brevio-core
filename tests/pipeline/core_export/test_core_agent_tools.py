@@ -260,6 +260,32 @@ class TestAdd(unittest.TestCase):
             guards = read_json(d, ".brevio/guards.json")["guards"]
             self.assertEqual({g["status"] for g in guards.values()}, {"active"})
             self.assertTrue(os.path.isfile(os.path.join(d, ".agents", "rules", "pack-fastapi-lifespan.md")))
+            # Verify regex pattern scanning catches blocking requests.get and time.sleep
+            write(d, "api/routes.py", "async def get_items(url):\n    res = requests.get(url)\n    time.sleep(1)\n")
+            check_res = run_cli(d, "learn", "--check", "api/routes.py")
+            self.assertEqual(check_res.returncode, 1, check_res.stderr)
+            self.assertIn("pack-fastapi-no-blocking-io", check_res.stdout)
+
+    def test_multi_hunk_plan_guard_and_title_escaping(self):
+        from brevio.pipeline.gates import defect_compiler
+
+        diff = (
+            "--- a/README.md\n"
+            "+++ b/README.md\n"
+            "+Added a documentation line only\n"
+            "--- a/src/service.py\n"
+            "+++ b/src/service.py\n"
+            "-legacy_unsafe_call(user_input)\n"
+            "+safe_call(user_input)\n"
+        )
+        with tempfile.TemporaryDirectory() as d:
+            g = defect_compiler.compile_guard_from_diff(diff, name='Bad "quote"\nnewline', cwd=d)
+            self.assertIsNotNone(g)
+            self.assertEqual(g["source_file"], "src/service.py")
+            self.assertEqual(g["patterns"], ["legacy_unsafe_call(user_input)"])
+            with open(os.path.join(d, g["rule_file"]), encoding="utf-8") as fh:
+                rule_md = fh.read()
+            self.assertIn("description: \"Learned Guard: Bad 'quote' newline\"", rule_md)
 
     def test_an_unknown_pack_exits_non_zero_and_writes_nothing(self):
         with tempfile.TemporaryDirectory() as d:

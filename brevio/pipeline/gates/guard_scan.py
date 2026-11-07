@@ -26,23 +26,45 @@ def _glob_match(path: str, glob: str) -> bool:
     return fnmatch.fnmatch(path, glob) or fnmatch.fnmatch(path, glob.replace("**/", ""))
 
 
+_REGEX_META_RE = re.compile(r"\.\*|\\[sSwWdDbB()]|\(\?[!:<=]")
+
+
+def _compile_pattern(raw_pat: str) -> tuple[str, re.Pattern[str] | None, str]:
+    is_rx = raw_pat.startswith("re:") or bool(_REGEX_META_RE.search(raw_pat))
+    expr = raw_pat[3:] if raw_pat.startswith("re:") else raw_pat
+    if is_rx:
+        try:
+            return raw_pat, re.compile(expr), expr
+        except re.error:
+            pass
+    lit = expr.replace("\\\\", "\\")
+    return lit, None, lit
+
+
+def _line_matches(compiled: tuple[str, re.Pattern[str] | None, str], ln: str) -> bool:
+    _label, rx, lit = compiled
+    if rx is not None:
+        return bool(rx.search(ln))
+    return lit in ln
+
+
 def guard_hits(guard: dict[str, Any], files: dict[str, list[str]]) -> list[tuple[str, str]]:
     """(file, pattern) pairs where an added line holds one of the guard's patterns."""
     hits: list[tuple[str, str]] = []
-    pats = [p.replace("\\\\", "\\") for p in guard.get("patterns", [])]
+    pats = [_compile_pattern(p) for p in guard.get("patterns", [])]
     for path, lines in files.items():
         if not any(_glob_match(path, g) for g in guard.get("file_patterns", [])):
             continue
         normed = [_norm(ln) for ln in lines]
-        hits.extend((path, p) for p in pats if any(p in ln for ln in normed))
+        hits.extend((path, pat[0]) for pat in pats if any(_line_matches(pat, ln) for ln in normed))
     return hits
 
 
 def line_hits(guard: dict[str, Any], files: dict[str, list[str]]) -> int:
     """How many lines of ``files`` ({path: lines}) hold one of the guard's patterns, in the files it watches."""
-    pats = [p.replace("\\\\", "\\") for p in guard.get("patterns", [])]
+    pats = [_compile_pattern(p) for p in guard.get("patterns", [])]
     return sum(1 for path, lines in files.items() if any(_glob_match(path, g) for g in guard.get("file_patterns", []))
-               for ln in map(_norm, lines) if any(p in ln for p in pats))
+               for ln in map(_norm, lines) if any(_line_matches(pat, ln) for pat in pats))
 
 
 def scan_files(

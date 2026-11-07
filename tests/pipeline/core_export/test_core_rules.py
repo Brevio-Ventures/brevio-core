@@ -174,6 +174,59 @@ class TestCodeRules(unittest.TestCase):
         })
         self.assertEqual([f.split(":")[0] for f in found], ["src/protocol.ts"])
 
+    def test_promoted_rules_r55_r101_r162_and_r182_flag_bad_patterns_and_pass_clean_code(self):
+        found = scan_added_lines_for_rules({
+            "src/runner.py": [
+                "subprocess.run(cmd, shell=True)",
+                'os.system(f"rm -rf {target}")',
+                'subprocess.run(["git", "status"], timeout=30, check=True)',
+            ],
+            "tests/test_runner.py": [
+                "subprocess.run(cmd, shell=True)",
+            ],
+            "src/client.py": [
+                "res = requests.get(url)",
+                "res = requests.post(url, json=payload, timeout=10)",
+            ],
+            "package.json": [
+                '  "version": "*",',
+                '  "private": "*",',
+                '  "left-pad": "*",',
+                '  "lodash": "latest",',
+                '  "zod": "3.22.4"',
+            ],
+            "src/Link.tsx": [
+                '<a href="/docs" target="_blank">Docs</a>',
+                '<a href="/docs" target="_blank" rel="noopener noreferrer">Docs</a>',
+            ],
+        })
+        self.assertEqual([f.split(":")[1] for f in found if "[R5.5]" in f], ["1", "2"])
+        self.assertEqual([f.split(":")[1] for f in found if "[R10.1]" in f], ["1"])
+        self.assertEqual([f.split(":")[1] for f in found if "[R16.2]" in f], ["3", "4"])
+        self.assertEqual([f.split(":")[1] for f in found if "[R18.2]" in f], ["1"])
+
+    def test_r28_flags_raw_sql_interpolation_and_bidi_control_chars_and_r131_flags_client_env_secrets(self):
+        bidi = "const isAdmin = false; // \u202e } \u2066if (isAdmin)\u2069"
+        found = scan_added_lines_for_rules({
+            "src/db.py": [
+                'cursor.execute(f"SELECT * FROM users WHERE id = {uid}")',
+                'cursor.execute("SELECT * FROM users WHERE id = %s", (uid,))',
+            ],
+            "src/repo.ts": [
+                "await prisma.$queryRawUnsafe(`SELECT * FROM orders WHERE id = ${orderId}`);",
+                bidi,
+            ],
+            "src/env.ts": [
+                "const key = process.env.NEXT_PUBLIC_SUPABASE_SERVICE_ROLE_KEY;",
+                "const db = import.meta.env.VITE_DATABASE_URL;",
+                "const pub = process.env.NEXT_PUBLIC_APP_URL;",
+            ],
+        })
+        r28 = [f"{f.split(':')[0]}:{f.split(':')[1]}" for f in found if "[R2.8]" in f]
+        r131 = [f"{f.split(':')[0]}:{f.split(':')[1]}" for f in found if "[R13.1]" in f]
+        self.assertEqual(r28, ["src/db.py:1", "src/repo.ts:1", "src/repo.ts:2"])
+        self.assertEqual(r131, ["src/env.ts:1", "src/env.ts:2"])
+
 
 class TestDevRules(unittest.TestCase):
     def test_the_catalogue_holds_46_rules(self):

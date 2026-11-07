@@ -153,6 +153,7 @@ def render(rule_id: str, cards: frozenset[str] | None = None) -> str:
             f"**Short answer:** {answer(rule_id)}\n\n"
             f"Group: {group}. Status: {rule_status(rule_id)}.{reason} Generated from the rule definitions; do not edit "
             "by hand.\n\n"
+            f"Playground: <https://brevio.pro/tools/agent-guard-playground?rule={rule_id}>\n\n"
             f"## What it catches\n\n{text}.\n\n"
             f"## Why\n\n{d.why}\n\n"
             f"## A bad example\n\n{_fence(d.lang, d.bad)}\n\n"
@@ -160,6 +161,9 @@ def render(rule_id: str, cards: frozenset[str] | None = None) -> str:
             f"## How it is checked\n\n{checks}\n\n"
             f"## How to silence it\n\n{silence_text(rule_id)}\n\n"
             f"## Related rules\n\n{links}\n")
+
+
+render_rule = render
 
 
 def json_ld(rule_id: str) -> str:
