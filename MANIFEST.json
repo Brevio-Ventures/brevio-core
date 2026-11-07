@@ -1,7 +1,7 @@
 {
  "schema": 1,
- "version": "0.9.0",
- "harness_commit": "fa5108166ebe11df8319643993ce7ce398d47821",
+ "version": "0.9.1",
+ "harness_commit": "12ec026c6a323d5187f866a48073f8296781356f",
  "set": "0.6",
  "files": {
   ".github/ISSUE_TEMPLATE/bug.yml": "tools/core_release/.github/ISSUE_TEMPLATE/bug.yml",
@@ -70,6 +70,7 @@
   "brevio/pipeline/core_memory.py": "brevio/pipeline/core_memory.py",
   "brevio/pipeline/core_score.py": "brevio/pipeline/core_score.py",
   "brevio/pipeline/core_shield.py": "brevio/pipeline/core_shield.py",
+  "brevio/pipeline/core_task.py": "brevio/pipeline/core_task.py",
   "brevio/pipeline/core_up.py": "brevio/pipeline/core_up.py",
   "brevio/pipeline/dev_rules.py": "brevio/pipeline/dev_rules.py",
   "brevio/pipeline/gates/__init__.py": "tools/export_core.py",
@@ -248,7 +249,6 @@
   "tests/pipeline/core_export/test_core_config.py": "tests/pipeline/core_export/test_core_config.py",
   "tests/pipeline/core_export/test_core_fix.py": "tests/pipeline/core_export/test_core_fix.py",
   "tests/pipeline/core_export/test_core_gates.py": "tests/pipeline/core_export/test_core_gates.py",
-  "tests/pipeline/core_export/test_core_heal.py": "tests/pipeline/core_export/test_core_heal.py",
   "tests/pipeline/core_export/test_core_hook.py": "tests/pipeline/core_export/test_core_hook.py",
   "tests/pipeline/core_export/test_core_init.py": "tests/pipeline/core_export/test_core_init.py",
   "tests/pipeline/core_export/test_core_leak.py": "tests/pipeline/core_export/test_core_leak.py",
@@ -262,6 +262,7 @@
   "tests/pipeline/core_export/test_core_security.py": "tests/pipeline/core_export/test_core_security.py",
   "tests/pipeline/core_export/test_core_shield.py": "tests/pipeline/core_export/test_core_shield.py",
   "tests/pipeline/core_export/test_core_skill.py": "tests/pipeline/core_export/test_core_skill.py",
+  "tests/pipeline/core_export/test_core_task.py": "tests/pipeline/core_export/test_core_task.py",
   "tests/pipeline/core_export/test_core_up.py": "tests/pipeline/core_export/test_core_up.py"
  }
 }

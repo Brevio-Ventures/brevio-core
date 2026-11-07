@@ -75,11 +75,12 @@ def _git(cwd: str, *args: str) -> str:
     return r.stdout if r.returncode == 0 else ""
 
 
-def _resolve_base(root: str, base: str) -> str:
-    for cand in (base, "origin/main", "main", "HEAD"):
+def _resolve_base(root: str, base: str | None = "HEAD") -> str:
+    cands = [b for b in (base, "origin/main", "main", "HEAD") if b]
+    for cand in cands:
         if _git(root, "rev-parse", "--verify", "-q", cand).strip():
             return cand
-    return base
+    return base or "HEAD"
 
 
 def _is_conflict_marker(text: str) -> bool:
@@ -753,6 +754,7 @@ def run_check(
     passed = len(all_findings) == 0
 
     return {
+        "ok": passed,
         "passed": passed,
         "findings": all_findings,
         "checks": {

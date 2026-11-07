@@ -446,14 +446,14 @@ def _extract_signatures(root: str, files: Iterable[str], limit: int = 20) -> lis
     return sigs
 
 
-def brief_for_files(files: list[str], cwd: str | None = None) -> dict[str, Any]:
+def brief_for_files(files: list[str], cwd: str | None = None, root: str | None = None) -> dict[str, Any]:
     """Combine micro rules, recalled episodes, and 1-hop neighbors for files."""
-    root = cwd if cwd is not None else agent_host.config.WORKSPACE_DIR
+    target_root = root if root is not None else (cwd if cwd is not None else agent_host.config.WORKSPACE_DIR)
     target_set = {f.replace(os.sep, "/") for f in files}
     micro_rules = dev_rules.slice_micro_rules(files)
-    neighbors = one_hop_neighbors(root, files)
+    neighbors = one_hop_neighbors(target_root, files)
 
-    episodes = load_episodes(cwd=root)
+    episodes = load_episodes(cwd=target_root)
     recalled: list[dict[str, Any]] = []
     for ep in episodes:
         ep_file = str(ep.get("file", "")).replace(os.sep, "/")
@@ -463,15 +463,16 @@ def brief_for_files(files: list[str], cwd: str | None = None) -> dict[str, Any]:
         elif ep_file in neighbors:
             score = 0.5
         if score > 0.0:
-            stale = is_lesson_stale(ep, root=root)
+            stale = is_lesson_stale(ep, root=target_root)
             recalled.append(dict(ep, score=score, stale=stale))
 
     recalled.sort(key=lambda e: (e.get("score", 0.0), e.get("at", "")), reverse=True)
-    guards = _load_active_guards(root, files)
-    signatures = _extract_signatures(root, [*files, *sorted(neighbors)])
+    guards = _load_active_guards(target_root, files)
+    signatures = _extract_signatures(target_root, [*files, *sorted(neighbors)])
     return {
         "files": files,
         "micro_rules": micro_rules,
+        "surface_rules": micro_rules,
         "episodes": recalled,
         "neighbors": sorted(neighbors),
         "guards": guards,

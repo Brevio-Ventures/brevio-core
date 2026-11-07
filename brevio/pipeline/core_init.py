@@ -45,7 +45,7 @@ MARK_START, MARK_END = "<!-- brevio-core:start -->", "<!-- brevio-core:end -->"
 SERVER = "brevio-core"
 MCP_FILES = {"claude_code": ".mcp.json", "cursor": ".cursor/mcp.json"}
 DEFAULT_PARTS = ("action", "agents-md", "baseline")
-OPT_IN_PARTS = ("precommit", "hook", "mcp")
+OPT_IN_PARTS = ("precommit", "hook", "mcp", "specs")
 # Third-party actions are pinned to a commit, not a movable tag (ADOPTION.md rule "everything is pinned", 2026-11-05).
 CHECKOUT_PIN = "11bd71901bbe5b1630ceea73d27597364c9af683  # v4.2.2"
 BADGE_IMAGE ="https://img.shields.io/badge/checked%20by-brevio--core-blue"
@@ -489,6 +489,111 @@ def plan_mcp(ctx: Ctx) -> list[Op]:
     return ops
 
 
+def render_specs(root: str, stack: list[str] | None = None) -> dict[str, str]:
+    """Generate deterministic starter content for CONSTITUTION.md, CLAUDE.md, and roadmap.json."""
+    if stack is None:
+        stack = detect_stack(root)
+    raw_slug = os.path.basename(os.path.abspath(root))
+    project_slug = re.sub(r"[^a-zA-Z0-9_-]", "-", raw_slug).strip("-") or "project"
+    stack_str = ", ".join(stack) if stack else "generic"
+
+    constitution_text = (
+        f"# Engineering Constitution: {project_slug}\n\n"
+        "## 1. Architecture Invariants\n"
+        f"- Stack: {stack_str}\n"
+        "- Clean boundaries: Modules declare explicit public interfaces and preserve loose coupling.\n"
+        "- Standard library and deterministic execution: zero external network dependencies in flight checks.\n\n"
+        "## 2. File Custody & Preservation Rules\n"
+        "- Never remove existing tests or loosen assertions without explicit design authorization.\n"
+        "- Preserve existing docstrings, license headers, and architecture comments.\n"
+        "- Task isolation: scope file modifications strictly to the acceptance criteria.\n\n"
+        "## 3. Zero-Regression Test Requirements\n"
+        "- Every defect fix and feature must ship with deterministic regression tests.\n"
+        "- Test suites must execute locally and in CI with clean zero exits.\n\n"
+        "## 4. Brevio-Core Flight Gate Invariants\n"
+        "- `brevio-core scan --diff HEAD`: Zero code rule findings allowed in modified lines.\n"
+        "- `brevio-core check`: Conflict markers, test custody, AST complexity, and orphan files must pass.\n"
+        "- `brevio-core score`: Agent Safety Score must maintain minimum quality bar (>= 80, Grade B or higher).\n"
+    )
+
+    claude_text = (
+        f"# {project_slug}\n\n"
+        "## Project Overview\n"
+        f"Engineering workspace for {project_slug} enforcing brevio-core single-task quality standards.\n\n"
+        "## Single-Task Local Workflow\n"
+        "Follow the deterministic task progression in order:\n"
+        "1. `brevio-core connect`: Detect stack and coding clients and scaffold specs.\n"
+        "2. `brevio-core plan [task]`: Create single-task plan (.brevio/task_plan.json & .brevio/TASK_PLAN.md).\n"
+        "3. `brevio-core build`: Execute build preparation and deterministic auto-fixes.\n"
+        "4. `brevio-core qa`: Run pre-PR flight gates and safety scorecard (.brevio/qa_report.json).\n"
+        "5. `brevio-core pr`: Verify QA gates and synthesize PR body (.brevio/PR_BODY.md).\n\n"
+        "Alternatively, run the entire loop in one step:\n"
+        "`brevio-core task [task]`\n\n"
+        "## Repository Invariants & Rules\n"
+        "@AGENTS.md\n"
+        "Refer to CONSTITUTION.md for architecture invariants, custody rules, and flight gate definitions.\n"
+    )
+
+    roadmap_data = {
+        "project": project_slug,
+        "edition": "core",
+        "items": [
+            {
+                "id": "TASK-001",
+                "title": "Pass single-task quality gates and eliminate code findings",
+                "priority": "P0",
+                "type": "quality",
+                "acceptance_criteria": [
+                    "Pass brevio-core scan --diff HEAD with 0 findings",
+                    "Pass brevio-core check pre-PR flight gates",
+                    "Achieve Agent Safety Score >= 80",
+                ],
+                "status": "todo",
+            },
+            {
+                "id": "TASK-002",
+                "title": "Establish test custody and baseline coverage invariants",
+                "priority": "P1",
+                "type": "testing",
+                "acceptance_criteria": [
+                    "Verify existing tests pass without regressions",
+                    "Ensure every new module has corresponding test custody",
+                ],
+                "status": "todo",
+            },
+            {
+                "id": "TASK-003",
+                "title": "Automate single-task PR receipt generation in local workflow",
+                "priority": "P2",
+                "type": "workflow",
+                "acceptance_criteria": [
+                    "Generate .brevio/PR_BODY.md with valid safety score badge",
+                    "Confirm roadmap item status transitions to done upon QA pass",
+                ],
+                "status": "todo",
+            },
+        ],
+    }
+    roadmap_text = json.dumps(roadmap_data, indent=2) + "\n"
+
+    return {
+        "CONSTITUTION.md": constitution_text,
+        "CLAUDE.md": claude_text,
+        "roadmap.json": roadmap_text,
+    }
+
+
+def plan_specs(ctx: Ctx) -> list[Op]:
+    specs = render_specs(ctx.root)
+    ops: list[Op] = []
+    for rel in ("CONSTITUTION.md", "CLAUDE.md", "roadmap.json"):
+        if os.path.exists(ctx.path(rel)):
+            ctx.notes.append(f"specs: {rel} exists, left as it is")
+        else:
+            ops.append(Op(rel, "file", specs[rel]))
+    return ops
+
+
 def plan_exclude(ctx: Ctx, local: list[Op], personal: bool = False) -> list[Op]:
     """Lines for git's local exclude file, so the personal files ``init`` writes are never committed by accident."""
     paths = {op.path for op in local if not ctx.ignored(op.path)}
@@ -511,6 +616,7 @@ def plan(ctx: Ctx, parts: set[str], personal: bool = False) -> list[Op]:
     """Every write ``parts`` need, in order; nothing is written here."""
     ops = (plan_action(ctx) if "action" in parts else []) + (plan_agents_md(ctx) if "agents-md" in parts else [])
     ops += plan_precommit(ctx) if "precommit" in parts else []
+    ops += plan_specs(ctx) if "specs" in parts else []
     local = (plan_hook(ctx) if "hook" in parts else []) + (plan_mcp(ctx) if "mcp" in parts else [])
     return ops + local + plan_exclude(ctx, local, personal=personal)
 
@@ -809,6 +915,7 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--yes", "-y", action="store_true", help="write without asking")
     ap.add_argument("--undo", action="store_true", help="remove what init wrote and is unchanged since")
     ap.add_argument("--personal", action="store_true", help="install personal agent hooks and MCP config only, git-excluded via .git/info/exclude (touches no tracked files)")
+    ap.add_argument("--specs", action="store_true", help="also write starter CLAUDE.md, CONSTITUTION.md and roadmap.json")
     ap.add_argument("--wizard", action="store_true", help="run the interactive onboarding wizard")
     args = ap.parse_args(argv)
     code, top = _git(os.getcwd(), "rev-parse", "--show-toplevel")
@@ -821,4 +928,6 @@ def main(argv: list[str] | None = None) -> int:
     if args.wizard:
         return interactive_wizard(root)
     parts = _parts(args.want, args.without, personal=args.personal)
+    if parts is not None and args.specs:
+        parts.add("specs")
     return 2 if parts is None else init(root, parts, args.yes, args.dry_run, personal=args.personal)

@@ -21,7 +21,7 @@ jobs:
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
         with:
           fetch-depth: 0
-      - uses: Brevio-Ventures/brevio-core@v0.8.1
+      - uses: Brevio-Ventures/brevio-core@v0.9.1
         with:
           sarif: true
 ```
@@ -37,27 +37,27 @@ It catches what review keeps finding in agent-written code:
 **No API key, no model. `scan`, the agent hook and the MCP server use no network and send nothing.**
 
 These are line-level pattern checks on the lines a change adds, not AST or dataflow analysis. The catalogue has
-123 rules: `brevio-core scan` checks 12 scanned rules, and the other 111 are documented rules,
+123 rules: `brevio-core scan` checks 13 scanned rules, and the other 110 are documented rules,
 written down for review and for agents, with no scanner in this package yet. Every finding links to its
 [rule page](docs/rules/README.md): what it catches, why, a bad and a good example.
 
 ## Run it without installing
 
-Version 0.8.1, Python 3.10 or newer, no runtime dependencies. In a repository, scan the lines your change adds:
+Version 0.9.1, Python 3.10 or newer, no runtime dependencies. In a repository, scan the lines your change adds:
 
 ```sh
-uvx brevio-core@0.8.1 scan --diff
-uvx brevio-core@0.8.1 score
+uvx brevio-core@0.9.1 scan --diff
+uvx brevio-core@0.9.1 score
 ```
 
 ```sh
-pipx run --spec brevio-core==0.8.1 brevio-core scan --diff
+pipx run --spec brevio-core==0.9.1 brevio-core scan --diff
 ```
 
 Or install it, then run it the same way:
 
 ```sh
-pip install brevio-core==0.8.1
+pip install brevio-core==0.9.1
 ```
 
 <!-- readme-test -->
@@ -228,7 +228,7 @@ run changes nothing.
 }
 ```
 
-Without a global install, use `"command": "uvx"` and `"args": ["brevio-core@0.8.1", "mcp"]`. Start the client in the project
+Without a global install, use `"command": "uvx"` and `"args": ["brevio-core@0.9.1", "mcp"]`. Start the client in the project
 folder: the server reads that folder and nothing else. The tools are `scan` (paths, or a diff base), `explain` (a rule
 id, returns the rule page), `list_rules` and `learn` (compiles a fixed defect into a guard).
 
@@ -289,7 +289,7 @@ The workflow at the top runs the scan on the lines a pull request adds. It write
 marks each finding on the changed file. With `pull-requests: write` it keeps one comment on the pull request up to date
 while there are findings, and marks it resolved once they are gone; a pull request from a fork gets the summary only.
 With `sarif: true` and `security-events: write` it uploads the findings to code scanning. It needs no secret and no
-API key. The tag `v0.8.1` runs exactly brevio-core 0.8.1. To follow every release instead, write
+API key. The tag `v0.9.1` runs exactly brevio-core 0.9.1. To follow every release instead, write
 `uses: Brevio-Ventures/brevio-core@v0`; to pin a commit, see [SECURITY-REVIEW.md](SECURITY-REVIEW.md). It runs on
 `pull_request`, `merge_group` and `push`, and refuses any other event.
 
@@ -298,7 +298,7 @@ API key. The tag `v0.8.1` runs exactly brevio-core 0.8.1. To follow every releas
 ```yaml
 repos:
   - repo: https://github.com/Brevio-Ventures/brevio-core
-    rev: v0.8.1
+    rev: v0.9.1
     hooks:
       - id: brevio-core
 ```

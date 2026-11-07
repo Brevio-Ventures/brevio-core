@@ -621,6 +621,7 @@ SCORE_MODULE = "core_score"     # the 0.6 set's ``score`` Agent Safety Score & R
 MAP_MODULE = "core_map"
 HEAL_MODULE = "core_heal"
 SHIELD_MODULE = "core_shield"
+TASK_MODULE = "core_task"
 
 
 def _opt_cmd(cmd: str, pkg: str, mod_name: str) -> tuple[dict[str, Callable[[list[str]], int]], dict[str, str]]:
@@ -678,6 +679,33 @@ def heal_command() -> tuple[dict[str, Callable[[list[str]], int]], dict[str, str
 
 def shield_command() -> tuple[dict[str, Callable[[list[str]], int]], dict[str, str]]:
     return _opt_cmd("shield", "pipeline", SHIELD_MODULE)
+
+
+def task_commands() -> tuple[dict[str, Callable[[list[str]], int]], dict[str, str]]:
+    mod = set_module("pipeline", TASK_MODULE)
+    if mod is None:
+        return ({}, {})
+    cmds: dict[str, Callable[[list[str]], int]] = {}
+    helps: dict[str, str] = {}
+    if hasattr(mod, "main_connect"):
+        cmds["connect"] = mod.main_connect
+        helps["connect"] = getattr(mod, "CONNECT_HELP", "detect stack and coding clients and export CLAUDE.md, CONSTITUTION.md & roadmap.json")
+    if hasattr(mod, "main_plan"):
+        cmds["plan"] = mod.main_plan
+        helps["plan"] = getattr(mod, "PLAN_HELP", "create a single-task implementation plan (.brevio/task_plan.json & .brevio/TASK_PLAN.md)")
+    if hasattr(mod, "main_build"):
+        cmds["build"] = mod.main_build
+        helps["build"] = getattr(mod, "BUILD_HELP", "execute single-task build preparation and deterministic auto-fixes")
+    if hasattr(mod, "main_qa"):
+        cmds["qa"] = mod.main_qa
+        helps["qa"] = getattr(mod, "QA_HELP", "run the single-task pre-PR quality gates and safety scorecard")
+    if hasattr(mod, "main_pr"):
+        cmds["pr"] = mod.main_pr
+        helps["pr"] = getattr(mod, "PR_HELP", "verify QA gates and generate a pull-request receipt (.brevio/PR_BODY.md)")
+    if hasattr(mod, "main"):
+        cmds["task"] = mod.main
+        helps["task"] = getattr(mod, "HELP", "run the single-task local workflow (connect -> plan -> build -> qa -> pr)")
+    return (cmds, helps)
 
 
 def roast_command() -> tuple[dict[str, Callable[[list[str]], int]], dict[str, str]]:
@@ -838,6 +866,7 @@ def line_commands() -> tuple[dict[str, Callable[[list[str]], int]], dict[str, st
         map_command(),
         heal_command(),
         shield_command(),
+        task_commands(),
         up_command(),
     ):
         tools, tool_help = {**tools, **more}, {**tool_help, **more_help}

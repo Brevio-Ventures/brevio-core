@@ -24,7 +24,7 @@ jobs:
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
         with:
           fetch-depth: 0
-      - uses: Brevio-Ventures/brevio-core@v0.8.1
+      - uses: Brevio-Ventures/brevio-core@v0.9.1
 ```
 
 `fetch-depth: 0` matters: the scan compares the change with its base commit, which must be in the checkout.
@@ -36,14 +36,14 @@ A tag can move; a commit SHA cannot. To pin the Action the way it pins its own d
 the release tag and name it, with the tag as a comment:
 
 ```sh
-git ls-remote https://github.com/Brevio-Ventures/brevio-core refs/tags/v0.8.1
+git ls-remote https://github.com/Brevio-Ventures/brevio-core refs/tags/v0.9.1
 ```
 
 ```yaml
-      - uses: Brevio-Ventures/brevio-core@<the commit SHA printed above> # v0.8.1
+      - uses: Brevio-Ventures/brevio-core@<the commit SHA printed above> # v0.9.1
 ```
 
-The Action installs exactly brevio-core 0.8.1 from PyPI, because `package-version` defaults to the release of the
+The Action installs exactly brevio-core 0.9.1 from PyPI, because `package-version` defaults to the release of the
 Action. Dependabot's `github-actions` updates move a pinned SHA and its comment together.
 
 `v0` is a moving major tag until 1.0. It is the easiest to write and the least predictable; use an exact tag or a SHA
@@ -128,7 +128,7 @@ Give the step an `id` to read them in a later step as `steps.<id>.outputs.status
 ### A trial week: report, never fail
 
 ```yaml
-      - uses: Brevio-Ventures/brevio-core@v0.8.1
+      - uses: Brevio-Ventures/brevio-core@v0.9.1
         with:
           fail-on: none
 ```
@@ -156,7 +156,7 @@ jobs:
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
         with:
           fetch-depth: 0
-      - uses: Brevio-Ventures/brevio-core@v0.8.1
+      - uses: Brevio-Ventures/brevio-core@v0.9.1
         with:
           sarif: true
           comment: never
@@ -167,7 +167,7 @@ jobs:
 With a `brevio-core.toml` that sets some rules to `warn` (see the README's team rollout):
 
 ```yaml
-      - uses: Brevio-Ventures/brevio-core@v0.8.1
+      - uses: Brevio-Ventures/brevio-core@v0.9.1
         with:
           fail-on: error
 ```
@@ -177,6 +177,6 @@ With a `brevio-core.toml` that sets some rules to `warn` (see the README's team 
 The Action is a thin wrapper. Any CI can run the same check:
 
 ```sh
-pip install brevio-core==0.8.1
+pip install brevio-core==0.9.1
 brevio-core scan --diff origin/main --sarif brevio-core.sarif
 ```

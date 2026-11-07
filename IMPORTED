@@ -3,3 +3,4 @@
 # (`<sha> #12 @handle`); CONTRIBUTORS.md is made from these lines. A release is refused while main has a commit
 # after the last release tag that is not listed here (CONTRIBUTING.md, "How this repo works").
 # The release writes this file; a pull request does not edit it.
+9e1850c10022d999e718ce7044345d81f9e2c244

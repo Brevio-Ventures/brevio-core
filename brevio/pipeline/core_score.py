@@ -149,6 +149,14 @@ def compute_scorecard(paths: list[str] | None = None, diff: str | None = None, r
     }
 
 
+def score_repository(root: str = ".", diff_base: str | None = None) -> dict[str, Any]:
+    """Score the repository at root and return scorecard with finding_count."""
+    card = compute_scorecard(diff=diff_base, root=root)
+    res = dict(card)
+    res["finding_count"] = len(card.get("findings", []))
+    return res
+
+
 def render_text(card: dict[str, Any], footer: str = "", roast: bool = False) -> str:
     """Format the Agent Safety Scorecard as plain text."""
     lines = [
