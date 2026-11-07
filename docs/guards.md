@@ -1,5 +1,9 @@
 # The guard format
 
+| In Plain English (For Anyone) | Technical Contract (For Engineers) |
+| --- | --- |
+| **What it does:** Turns any bug fix you commit into a permanent rule so an AI coding agent cannot re-introduce the same bug later.<br>**When to use it:** Right after fixing a bug (`brevio-core learn`) or when installing a starter rule pack (`brevio-core add`). | **Command:** `brevio-core learn` / `brevio-core learn --check`<br>**Artifacts:** `.brevio/guards.json` and `.agents/rules/<guard-id>.md`<br>**Exit Codes:** The exit code is 0 when nothing is found, 1 when not. |
+
 `brevio-core learn` turns a fixed defect into a guard: the lines the fix removed become patterns that must not come
 back. Guards live in `.brevio/guards.json` in your repository, next to an agent rule for each one in
 `.agents/rules/<guard id>.md`. Commit both, so the whole team and every agent get them. `brevio-core add <pack>`

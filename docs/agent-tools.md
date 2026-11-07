@@ -1,5 +1,9 @@
 # Agent tools (the 0.2 set)
 
+| In Plain English (For Anyone) | Technical Contract (For Engineers) |
+| --- | --- |
+| **What it does:** Gives your coding agent local hooks, learned bug guards, and an MCP server so it catches and repairs its own mistakes while editing.<br>**When to use it:** Inside any git checkout alongside Claude Code, Cursor, Codex, Hermes, or OpenClaw. | **Commands:** `brevio-core learn`, `brevio-core hook install`, `brevio-core gain`, `brevio-core add`, `brevio-core mcp`<br>**Artifacts:** `.brevio/guards.json`, `.agents/rules/`, `skills/brevio-core/SKILL.md`<br>**Exit Codes:** The exit code is 0 when nothing is found, 1 when not. |
+
 Five commands and an agent skill for the project you run them in. All are local, with no model call and no API key;
 `scan`, the agent hook and the MCP server use no network and send nothing. They work in the current folder, which
 should be a git checkout.
