@@ -62,7 +62,12 @@ PATH_KEYS = ("file_path", "path", "target_file")
 FAIL_OPEN = "brevio-core hook: skipped"
 # ``git commit``, also after ``-C dir`` or ``-c key=value`` options; the message is read from what follows it, which
 # holds ``-m`` and a heredoc alike. A command that only mentions a fix elsewhere (``./fix.sh && git commit``) is not one.
-_COMMIT = re.compile(r"\bgit(?:\s+-[cC]\s+\S+|\s+--[\w-]+(?:=\S+)?)*\s+commit\b")
+# Read token by token, each token looked at once, so no pattern repeats over another (a static analyser flagged the
+# one pattern this replaces, 2026-11-16).
+_WORDS = re.compile(r"\S+")
+_GIT_WORD = re.compile(r"(?<!\w)git\Z")
+_LONG_OPTION = re.compile(r"--[\w-]+(?:=\S+)?\Z")
+_COMMIT_WORD = re.compile(r"commit(?!\w)")
 # Fix-like words (ROADMAP E40): fix and its forms (bugfix, hotfix, fixes; not fixture), bug, revert, regression.
 _FIX_LIKE = re.compile(r"(?i)\b(?:hot|bug)?fix(?!tur)|\bbugs?\b|\brevert|\bregression")
 TRIAL_NOTE = "brevio-core: a preview rule or a learned guard on trial matched; it is reported only, nothing to fix unless you agree:\n"
@@ -131,8 +136,28 @@ def shell_command(payload: dict[str, Any]) -> str:
 
 def fix_commit(command: str) -> bool:
     """``command`` makes a commit whose message (what follows ``git commit``) holds a fix-like word."""
-    m = _COMMIT.search(command)
-    return bool(m and _FIX_LIKE.search(command[m.end():]))
+    end = commit_end(command)
+    return end is not None and bool(_FIX_LIKE.search(command[end:]))
+
+
+def commit_end(command: str) -> int | None:
+    """Where the ``commit`` of the first ``git [-c X | -C X | --option[=X]]... commit`` in ``command`` ends, or None."""
+    words = list(_WORDS.finditer(command))
+    n = len(words)
+    # after[i]: the first word at or past i that no option takes up, filled from the end
+    after = [0] * n + [n, n + 1]
+    for i in range(n - 1, -1, -1):
+        text = words[i].group()
+        if text in ("-c", "-C"):
+            after[i] = after[i + 2]       # the option and its value, whatever the value is
+        elif _LONG_OPTION.match(text):
+            after[i] = after[i + 1]
+        else:
+            after[i] = i
+    for start, word in enumerate(words):
+        if _GIT_WORD.search(word.group()) and after[start + 1] < n and _COMMIT_WORD.match(words[after[start + 1]].group()):
+            return words[after[start + 1]].start() + len("commit")
+    return None
 
 
 def _toplevel(folder: str) -> str | None:

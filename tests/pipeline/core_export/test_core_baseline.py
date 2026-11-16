@@ -636,8 +636,9 @@ class TestFactsLine(unittest.TestCase):
             self.assertNotIn("To repeat the scan", run_cli(d, "scan", "--format", "markdown", "--facts").stdout)    # no base to name
 
     def test_the_line_escapes_repository_text_and_drops_a_command_that_could_end_a_code_span(self):
+        # Bytes, not print: the line holds a zero-width space, which a pipe in the legacy code page of Windows cannot take.
         code = ("import sys; sys.path.insert(0, sys.argv[1]); from brevio.pipeline import core_markdown as m; "
-                "print(m.facts_line('0.11.0', 1, 2, 0.04, sys.argv[2], sys.argv[3], 'abc'))")
+                "sys.stdout.buffer.write(m.facts_line('0.11.0', 1, 2, 0.04, sys.argv[2], sys.argv[3], 'abc').encode('utf-8') + b'\\n')")
         safe = subprocess.run([sys.executable, "-I", "-c", code, TREE, "brevio-core scan --diff abc", "@o<b>"], capture_output=True, encoding="utf-8").stdout
         self.assertIn("1 rule ran, 2 files read, base @" + _ZW + "o&lt;b&gt;, head abc.", safe)
         self.assertIn("This run took 0.0 s on this runner. To repeat the scan: `brevio-core scan --diff abc`", safe)

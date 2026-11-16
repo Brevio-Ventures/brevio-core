@@ -1,7 +1,7 @@
 {
  "schema": 1,
  "version": "0.11.1",
- "harness_commit": "2ba21c9f9b6536fe2a5e2db2eeaee7d61997d155",
+ "harness_commit": "b4063f11f32e646dd680d713b3e543131b7e7566",
  "set": "0.7",
  "profile": "full",
  "files": {

@@ -249,6 +249,9 @@ def main(argv: list[str] | None = None, prog: str = "cli.py learn") -> int:
     parser.add_argument("--check", nargs="+", metavar="FILE", help="Run the learned guards over these files instead of compiling one")
 
     args = parser.parse_args(argv)
+    if not isinstance(args.diff, str):
+        # Python 3.10 drops a ``--`` given as ``--diff=--`` and hands over an empty list, past the type check
+        parser.error("argument --diff: must name a commit or a range, not start with a hyphen")
     if args.accept and args.action != "promote":
         parser.error("--accept goes with `learn promote`")
     if args.hit and args.action != "wrong":
