@@ -3,6 +3,7 @@
 Standard library only: the exporter copies this file beside the code (the 0.2 set) and it runs unchanged there. Every
 command runs on a temporary git repository in a clean ``-I`` child interpreter.
 """
+import argparse
 import json
 import os
 import subprocess
@@ -277,6 +278,36 @@ class TestAGuardWatchesTheFolderOfTheFixAndNeedsItsWholeSet(unittest.TestCase):
                     learn_cmd.main([f"--diff={value}", "--dry-run"])
             self.assertEqual(cm.exception.code, 2)
             self.assertFalse(os.path.exists(os.path.join(d, "planted.txt")))
+
+    def test_a_diff_value_that_an_older_argparse_hands_over_as_a_list_is_refused_too(self):
+        """Python 3.10 reads ``--diff=--`` as no value at all and passes ``[]`` on, past the type check (2026-11-16)."""
+        real = argparse.ArgumentParser.parse_args
+
+        def as_3_10(parser, argv=None, namespace=None):
+            got = real(parser, argv, namespace)
+            got.diff = []
+            return got
+        with tempfile.TemporaryDirectory() as d, self.assertRaises(SystemExit) as cm:
+            with unittest.mock.patch("os.getcwd", return_value=d), unittest.mock.patch.object(argparse.ArgumentParser, "parse_args", as_3_10):
+                learn_cmd.main(["--dry-run"])
+        self.assertEqual(cm.exception.code, 2)
+
+    def test_the_git_diff_call_never_gets_a_nested_argument(self):
+        seen = []
+
+        def fake_run(cmd, **kwargs):
+            seen.append(cmd)
+            return subprocess.CompletedProcess(cmd, 0, stdout="", stderr="")
+        with unittest.mock.patch.object(defect_compiler.subprocess, "run", fake_run):
+            defect_compiler.get_git_diff_text("HEAD~1", "/")
+            defect_compiler.get_git_diff_text(["--cached"], "/")
+            defect_compiler.get_git_diff_text([], "/")
+        self.assertEqual(len(seen), 3)
+        for cmd in seen:
+            self.assertTrue(all(isinstance(part, str) for part in cmd), cmd)
+        self.assertEqual(seen[0][-1], "HEAD~1")
+        self.assertEqual(seen[1][-1], "--cached")
+        self.assertEqual(seen[2][-2:], ["diff", "-U1"])
 
     def test_patterns_from_one_hunk_are_all_needed_and_one_of_them_alone_is_no_hit(self):
         d, guard = self.learned_loop()

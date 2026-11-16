@@ -425,6 +425,16 @@ class TestLearnAfterAFixCommit(unittest.TestCase):
                 res = fire(d, "claude_code", "PostToolUse", claude_bash(d, command), shell=True)
                 self.assertEqual((res.returncode, res.stdout, res.stderr), (0, "", ""), command)
 
+    def test_a_long_hostile_command_is_read_in_a_short_time(self):
+        """The ``git commit`` finder walks words once (2026-11-16): a long run of options is not a slow case."""
+        code = ("import sys, time; sys.path.insert(0, sys.argv[1]); from brevio.pipeline import core_hook as h; "
+                "n = 100000; t = time.perf_counter(); "
+                "a = h.fix_commit('git ' + '-c git ' * n + 'commit -m fix'); b = h.fix_commit('git ' + '-c git ' * n + 'status'); "
+                "c = h.fix_commit('git ' + '--no-pager ' * n + 'commit -m \\'tidy\\''); "
+                "print(a, b, c, time.perf_counter() - t < 5)")
+        res = subprocess.run([sys.executable, "-I", "-c", code, TREE], capture_output=True, encoding="utf-8", timeout=60)
+        self.assertEqual(res.stdout.split(), ["True", "False", "False", "True"], res.stderr)
+
     def test_the_shell_hook_never_scans(self):
         with tempfile.TemporaryDirectory() as d:
             repo(d, src__a_ts=CLEAN)

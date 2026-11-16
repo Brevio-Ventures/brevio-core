@@ -14,6 +14,7 @@ import json
 import os
 import re
 import subprocess
+from collections.abc import Sequence
 from typing import Any
 
 from brevio.pipeline.agent_host import config, gitsafe, jsonstore
@@ -90,9 +91,11 @@ def save_guards(data: dict[str, Any], cwd: str | None = None) -> None:
     jsonstore.write(path, data, indent=2, lock=False)
 
 
-def get_git_diff_text(diff_spec: str = "HEAD~1", cwd: str | None = None) -> str:
+def get_git_diff_text(diff_spec: str | Sequence[str] = "HEAD~1", cwd: str | None = None) -> str:
+    """The ``git diff`` of ``diff_spec``: one argument, or several (a list was once passed on as one nested argument)."""
     workspace = cwd or config.WORKSPACE_DIR
-    cmd = [*gitsafe.GIT, "-c", "core.quotepath=off", "diff", "-U1", diff_spec]    # a non-ASCII path stays readable in the header
+    spec = [diff_spec] if isinstance(diff_spec, str) else [str(part) for part in diff_spec]
+    cmd = [*gitsafe.GIT, "-c", "core.quotepath=off", "diff", "-U1", *spec]    # a non-ASCII path stays readable in the header
     try:
         proc = subprocess.run(cmd, cwd=workspace, capture_output=True, encoding="utf-8", errors="replace", timeout=15)
         return proc.stdout or ""

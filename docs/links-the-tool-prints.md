@@ -39,6 +39,7 @@ public repositories the precision run measures, and the documents' own links.
 - `https://github.com/Brevio-Ventures/brevio-core/issues`: `pyproject.toml`
 - `https://github.com/Brevio-Ventures/brevio-core/pull/11`: `CONTRIBUTORS.md`
 - `https://github.com/Brevio-Ventures/brevio-core/pull/14`: `CONTRIBUTORS.md`
+- `https://github.com/Brevio-Ventures/brevio-core/pull/15`: `CONTRIBUTORS.md`
 - `https://github.com/Brevio-Ventures/brevio-core/releases`: `README.md`
 - `https://github.com/Brevio-Ventures/brevio-core/security/advisories/new`: `.github/ISSUE_TEMPLATE/config.yml`
 - `https://github.com/Brevio-Ventures/brevio-core/tree/main/skills/brevio-core`: `docs/LISTINGS.md`
